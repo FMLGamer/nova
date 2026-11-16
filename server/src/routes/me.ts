@@ -62,9 +62,18 @@ meRouter.use(requireProfile);
 meRouter.get(
   '/upnext',
   asyncHandler(async (req, res) => {
-    res.json({ items: await upNext(req.profile!.id) });
+    const hidden = new Set(
+      (db.prepare('SELECT item_key FROM upnext_dismissed WHERE profile_id = ?').all(req.profile!.id) as { item_key: string }[]).map((r) => r.item_key),
+    );
+    res.json({ items: (await upNext(req.profile!.id)).filter((u) => !hidden.has(u.itemKey)) });
   }),
 );
+
+meRouter.post('/upnext/dismiss', (req, res) => {
+  const { itemKey } = parse(z.object({ itemKey: z.string().min(1).max(200) }), req.body);
+  db.prepare('INSERT OR IGNORE INTO upnext_dismissed (profile_id, item_key) VALUES (?, ?)').run(req.profile!.id, itemKey);
+  res.json({ ok: true });
+});
 
 meRouter.get('/history', (req, res) => {
   const limit = Math.min(200, Number(req.query.limit) || 60);

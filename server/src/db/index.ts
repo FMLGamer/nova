@@ -495,6 +495,20 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    // Up next cards a profile removed (one episode each; the following episode shows up again).
+    version: 8,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE upnext_dismissed (
+          profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+          item_key   TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (profile_id, item_key)
+        );
+      `);
+    },
+  },
 ];
 
 function migrate(): void {

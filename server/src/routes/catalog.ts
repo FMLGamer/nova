@@ -7,6 +7,9 @@ import { tmdbBrowse, tmdbFindByImdb, tmdbGenres } from '../services/tmdb.js';
 import { ANIME_GENRES, anilistBrowse, anilistRecent, anilistRows, anilistSchedule } from '../services/anilist.js';
 import { getSkipTimes } from '../services/aniskip.js';
 import { downloadSubtitleVtt, searchSubtitles, subtitlesConfigured } from '../services/subtitles.js';
+import { activePlugins } from '../plugins/manager.js';
+import { pluginSubtitleVtt, pluginSubtitles } from '../plugins/subtitles.js';
+import { HttpError } from '../lib/http.js';
 
 export const catalogRouter = Router();
 catalogRouter.use(requireAuth);
@@ -157,7 +160,7 @@ catalogRouter.get(
     const type = String(req.query.type ?? '');
     let mediaId: string | null = null;
     const imdb = /^(tt\d{5,10})(?::|$)/.exec(id);
-    if (imdb) mediaId = await tmdbFindByImdb(imdb[1]!).catch(() => null);
+    if (imdb) mediaId = await tmdbFindByImdb(imdb[1]!, type === 'movie' ? 'movie' : type === 'series' ? 'tv' : undefined).catch(() => null);
     else if (/^anilist:\d+/.test(id)) mediaId = `anime:${id.split(':')[1]}`;
     else if (/^tmdb:\d+/.test(id)) mediaId = `${type === 'movie' ? 'movie' : 'tv'}:${id.split(':')[1]}`;
     res.json({ mediaId });
@@ -165,8 +168,29 @@ catalogRouter.get(
 );
 
 catalogRouter.get('/subtitles/status', (_req, res) => {
-  res.json({ configured: subtitlesConfigured() });
+  res.json({ configured: subtitlesConfigured(), plugins: activePlugins('subtitles').length });
 });
+
+/** Subtitles offered by subtitle plugins (OpenSubtitles v3 and friends) for a title or episode. */
+catalogRouter.get(
+  '/subtitles/sources',
+  asyncHandler(async (req, res) => {
+    const mediaId = String(req.query.mediaId ?? '');
+    if (!/^(movie|tv|anime):[\w-]+$/.test(mediaId)) throw new HttpError(400, 'mediaId is required');
+    const num = (v: unknown) => (v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null);
+    res.json({ subtitles: await pluginSubtitles(mediaId, num(req.query.season), num(req.query.episode)) });
+  }),
+);
+
+catalogRouter.get(
+  '/subtitles/plugin/:token',
+  asyncHandler(async (req, res) => {
+    const vtt = await pluginSubtitleVtt(req.params.token);
+    res.setHeader('Content-Type', 'text/vtt; charset=utf-8');
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.send(vtt);
+  }),
+);
 
 catalogRouter.get(
   '/subtitles/file/:fileId',

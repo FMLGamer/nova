@@ -34,7 +34,7 @@ function requireUser(p: Plugin, accountId: string, scope: string): void {
 async function resolveImported(h: ImportedHistory): Promise<string | null> {
   if (h.ids.anilist) return `anime:${h.ids.anilist}`;
   if (h.ids.tmdb) return `${h.kind === 'movie' ? 'movie' : 'tv'}:${h.ids.tmdb}`;
-  if (h.ids.imdb) return tmdbFindByImdb(h.ids.imdb).catch(() => null);
+  if (h.ids.imdb) return tmdbFindByImdb(h.ids.imdb, h.kind === 'movie' ? 'movie' : 'tv').catch(() => null);
   return null;
 }
 

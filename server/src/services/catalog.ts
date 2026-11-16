@@ -2,6 +2,7 @@ import { HttpError } from '../lib/http.js';
 import type { CatalogDetail, CatalogItem, Episode, Row } from '../media/types.js';
 import { parseMediaId, stripAnimeSeason } from '../media/types.js';
 import { anilistDetail, anilistEpisodes, anilistRows, anilistSearch } from './anilist.js';
+import { aniZip, toEpisode, zipEpisodes } from './anizip.js';
 import { tmdbDetail, tmdbEpisodes, tmdbFindTv, tmdbRows, tmdbSearch, tmdbTvSeasons } from './tmdb.js';
 
 async function settledRow(
@@ -64,7 +65,25 @@ export function pickTmdbSeason(
 }
 
 async function animeEpisodes(providerId: string): Promise<Episode[]> {
-  const aniList = await anilistEpisodes(providerId).catch(() => [] as Episode[]);
+  const [aniList, zip] = await Promise.all([anilistEpisodes(providerId).catch(() => [] as Episode[]), aniZip(providerId)]);
+  const zipped = zipEpisodes(zip);
+  if (zipped.size) {
+    const count = Math.max(aniList.length, ...zipped.keys());
+    const out: Episode[] = [];
+    for (let n = 1; n <= count; n++) {
+      const z = zipped.get(n);
+      const a = aniList[n - 1];
+      if (z) {
+        const e = toEpisode(providerId, n, z);
+        out.push(a && !z.image ? { ...e, still: a.still } : e);
+      } else if (a) out.push(a);
+    }
+    if (out.length) return out;
+  }
+  return animeEpisodesFromTmdb(providerId, aniList);
+}
+
+async function animeEpisodesFromTmdb(providerId: string, aniList: Episode[]): Promise<Episode[]> {
   try {
     const detail = await anilistDetail(providerId);
     const tmdbId = await tmdbFindTv(stripAnimeSeason(detail.title), detail.year);

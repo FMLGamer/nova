@@ -148,6 +148,7 @@ function ContinueRail() {
           title={p.title ?? 'Untitled'}
           subtitle={[episodeLabel(p.mediaType, p.season, p.episode), fmtLeft(p.positionSeconds, p.durationSeconds)].filter(Boolean).join(' · ')}
           progress={p.durationSeconds ? p.positionSeconds / p.durationSeconds : 0}
+          detailsTo={titlePath(p.mediaId, { season: p.season, episode: p.episode })}
           onRemove={async () => {
             await api.progress.remove(p.itemKey);
             qc.invalidateQueries({ queryKey: ['continue'] });
@@ -159,6 +160,7 @@ function ContinueRail() {
 }
 
 function UpNextRail() {
+  const qc = useQueryClient();
   const { data } = useUpNext();
   if (!data?.length) return null;
   return (
@@ -171,6 +173,13 @@ function UpNextRail() {
           title={u.title}
           subtitle={[episodeLabel(u.mediaType, u.season, u.episode), u.episodeTitle].filter(Boolean).join(' · ')}
           badge={<span className="bg-gradient-accent rounded-md px-1.5 py-0.5 text-[10px] font-bold text-on-accent uppercase">New</span>}
+          detailsTo={titlePath(u.mediaId, { season: u.season, episode: u.episode })}
+          removeLabel="Remove from Up next"
+          onRemove={async () => {
+            qc.setQueriesData<typeof data>({ queryKey: ['upnext'] }, (old) => old?.filter((x) => x.itemKey !== u.itemKey));
+            await api.me.dismissUpNext(u.itemKey);
+            qc.invalidateQueries({ queryKey: ['upnext'] });
+          }}
         />
       ))}
     </Rail>
@@ -356,7 +365,7 @@ export function Home() {
         {contrib?.catalogs.slice(0, 6).map((c) => <PluginRail key={`${c.pluginId}:${c.type}:${c.id}`} catalog={c} />)}
         {isError && !rows?.length && (
           <Empty title="The catalogue is warming up">
-            Movies and shows need a free TMDB key: add it under Server → Overview → Integrations. Anime works out of the box.
+            Nova couldn't reach its metadata sources. Check your internet connection and try again in a moment.
           </Empty>
         )}
       </div>

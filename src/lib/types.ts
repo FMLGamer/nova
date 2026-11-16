@@ -445,6 +445,9 @@ export interface SubtitleOption {
   language: string;
   release: string;
   match: 'exact' | 'likely';
+  /** Set for subtitles from a plugin (e.g. OpenSubtitles v3): the VTT URL and who provided it. */
+  url?: string;
+  provider?: string;
 }
 
 export interface SkipTimes {

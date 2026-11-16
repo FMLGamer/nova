@@ -46,8 +46,8 @@ function Meta({ r }: { r: Release }) {
   return (
     <span className="flex items-center gap-2 text-xs text-muted">
       {r.sizeBytes > 0 && <span>{fmtBytes(r.sizeBytes)}</span>}
-      {r.infoHash && (
-        <span className="flex items-center gap-1">
+      {(r.infoHash || !r.url || r.seeders > 0) && (
+        <span className="flex items-center gap-1" title={`${r.seeders} seeders${r.leechers ? ` · ${r.leechers} leechers` : ''}`}>
           <Users className="size-3" /> {r.seeders}
         </span>
       )}

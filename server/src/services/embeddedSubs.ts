@@ -280,3 +280,20 @@ export function assToPlain(block: string): string {
     .replace(/\\h/g, ' ')
     .trim();
 }
+
+/** What has been read of a track so far (by any viewer): its blocks and the covered time ranges. */
+export function knownTrack(src: MediaSource, trackNumber: number): { blocks: SubtitleBlock[]; ranges: [number, number][]; complete: boolean } {
+  const s = stateFor(src.key, trackNumber);
+  return { blocks: [...s.blocks.values()].sort((a, b) => a.start - b.start), ranges: s.times(), complete: s.complete };
+}
+
+/** Keeps reading a track from `fromSeconds` in the background (paced to the download) until `signal` aborts. */
+export function followTrack(src: MediaSource, trackNumber: number, fromSeconds: number, signal: AbortSignal): Promise<void> {
+  return streamEmbeddedTrack(src, trackNumber, fromSeconds, () => undefined, signal).catch(() => undefined);
+}
+
+/** True once the track's covered ranges reach `until` from `from` (seconds), or the whole track is known. */
+export function trackCovers(src: MediaSource, trackNumber: number, from: number, until: number): boolean {
+  const k = knownTrack(src, trackNumber);
+  return k.complete || k.ranges.some(([a, b]) => a <= from + 1 && b >= until);
+}

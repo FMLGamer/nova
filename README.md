@@ -63,8 +63,11 @@ volumes: { nova-data: {}, nova-library: {}, nova-cache: {} }
 
 ## Configuration
 
-Nothing is required. Keys for TMDB, OpenSubtitles and DeepL can be entered under **Server → Overview → Integrations**.
-Plugins are installed and configured under **Server → Plugins**.
+Nothing is required. Movies and shows use Cinemeta (Stremio's open IMDb catalogue) and anime uses AniList and ani.zip,
+so posters, episodes and artwork work without any key. A TMDB key (optional) adds TMDB's trending lists, cast photos and
+recommendations; keys for TMDB, OpenSubtitles and DeepL can be entered under **Server → Overview → Integrations**.
+Plugins are installed and configured under **Server → Plugins**. For subtitles without an account, install the
+**OpenSubtitles v3** plugin.
 
 If you prefer declarative config, every setting can also come from the environment, and environment values take
 priority:
@@ -75,7 +78,7 @@ priority:
 | `PUBLIC_URL` | request host | Base for share links and external-player links |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / generated | First-boot admin |
 | `SESSION_SECRET` | generated in `/data` | Signing key for sessions |
-| `TMDB_API_KEY` | none | Movie and TV metadata. Anime (AniList) needs no key. |
+| `TMDB_API_KEY` | none | Optional TMDB metadata (without it, Cinemeta is used). Anime (AniList) needs no key. |
 | `OPENSUBTITLES_API_KEY`, `_USERNAME`, `_PASSWORD` | none | In-player subtitle search |
 | `PLUGINS_AUTOINSTALL` | none | Manifest URLs installed and approved on boot |
 | `PLUGIN_<ID>_<KEY>` | none | Plugin config, e.g. `PLUGIN_NOVA_PROWLARR_URL`, `PLUGIN_NOVA_PROWLARR_APIKEY` |
@@ -85,6 +88,8 @@ priority:
 | `MAX_TRANSCODES` | `1` | Concurrent full transcodes |
 | `HW_ACCEL` | none | `vaapi` for Intel/AMD hardware transcoding (pass `/dev/dri`) |
 | `COOKIE_SECURE` | follows HTTPS | Force `true`/`false` |
+| `CAST_DEVICES` | none | TVs to offer when discovery can't see them, e.g. `chromecast:192.168.1.40,dlna:http://192.168.1.41:9197/dmr` |
+| `CAST_PORT` | `11472` (Windows app) | LAN port the Windows app serves cast streams on |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | none | Built-in local assistant model (needs tool calling) |
 
 Back up `/data`. Everything else can be rebuilt.
@@ -102,6 +107,12 @@ Back up `/data`. Everything else can be rebuilt.
   - ASS/SSA tracks render with libass (JASSUB), including embedded fonts, signs and karaoke.
   - OpenSubtitles search and machine translation.
 - **Skipping:** intro and credits through AniSkip, or the file's own chapters.
+- **Casting:**
+  - Finds Chromecasts / Google TVs (mDNS) and DLNA TVs (SSDP) on the network of the machine that streams; Chrome and
+    Edge can also use their own Cast menu.
+  - Text subtitles go to the TV as subtitles. ASS/SSA subtitles are burned into the picture while casting (one live
+    encode with the file's own fonts, on the GPU when there is one).
+  - A server in a container only sees TVs with host networking, or the ones listed in `CAST_DEVICES`.
 - **Reading:** a comic reader (single page, spread or scroll, in either direction) and an EPUB/PDF reader with highlights,
   notes and dyslexia-friendly typefaces.
 - **Live TV:** M3U, Xtream, Stalker/Ministra and HDHomeRun inputs, the iptv-org directory and an XMLTV guide.

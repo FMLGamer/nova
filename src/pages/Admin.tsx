@@ -107,8 +107,8 @@ function Overview() {
 
 // ---------------------------------------------------------------- integrations
 const INTEGRATIONS: { key: string; label: string; hint: ReactNode; secret?: boolean }[] = [
-  { key: 'tmdbApiKey', label: 'TMDB API key', hint: <>Movies and shows: posters, details, episodes. Free at <a className="underline" href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">themoviedb.org</a>.</>, secret: true },
-  { key: 'openSubtitlesApiKey', label: 'OpenSubtitles API key', hint: 'Subtitle search in the player.', secret: true },
+  { key: 'tmdbApiKey', label: 'TMDB API key', hint: <>Optional. Movies and shows already work without it (IMDb data via Cinemeta); a key adds TMDB's trending lists, cast photos and recommendations. Free at <a className="underline" href="https://www.themoviedb.org/settings/api" target="_blank" rel="noreferrer">themoviedb.org</a>. Changing it changes the ids of new titles, so set it once.</>, secret: true },
+  { key: 'openSubtitlesApiKey', label: 'OpenSubtitles API key', hint: 'Optional. Without it, install the OpenSubtitles v3 plugin for keyless subtitle search.', secret: true },
   { key: 'openSubtitlesUsername', label: 'OpenSubtitles username', hint: 'Needed to download subtitles.' },
   { key: 'openSubtitlesPassword', label: 'OpenSubtitles password', hint: 'Stored encrypted.', secret: true },
   { key: 'deeplApiKey', label: 'DeepL API key', hint: 'Optional: better subtitle translation.', secret: true },

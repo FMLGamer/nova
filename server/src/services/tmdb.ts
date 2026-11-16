@@ -1,4 +1,15 @@
 import { integration } from './integrations.js';
+import {
+  cinemetaBrowse,
+  cinemetaDetail,
+  cinemetaEpisodes,
+  cinemetaFindByImdb,
+  cinemetaGenres,
+  cinemetaRows,
+  cinemetaSearch,
+  cinemetaTvSeasons,
+  isImdbId,
+} from './cinemeta.js';
 import { HttpError } from '../lib/http.js';
 import { cached } from '../lib/cache.js';
 import { fetchJson } from '../lib/upstream.js';
@@ -14,6 +25,12 @@ import type {
 const BASE = 'https://api.themoviedb.org/3';
 const IMG = 'https://image.tmdb.org/t/p';
 const DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * TMDB needs a personal API key. Without one, movies and shows come from
+ * Cinemeta (keyless, IMDb ids); titles with IMDb ids always do.
+ */
+const keyless = () => !integration('tmdbApiKey');
 
 interface TmdbListItem {
   id: number;
@@ -149,16 +166,17 @@ async function list(kind: 'movie' | 'tv', pathname: string, cacheKey: string): P
 }
 
 export const tmdbRows = {
-  trendingMovies: () => list('movie', '/trending/movie/week', 'tmdb:trending:movie'),
-  trendingTv: () => list('tv', '/trending/tv/week', 'tmdb:trending:tv'),
-  popularMovies: () => list('movie', '/movie/popular', 'tmdb:popular:movie'),
-  popularTv: () => list('tv', '/tv/popular', 'tmdb:popular:tv'),
-  topRatedMovies: () => list('movie', '/movie/top_rated', 'tmdb:toprated:movie'),
-  nowPlaying: () => list('movie', '/movie/now_playing', 'tmdb:nowplaying:movie'),
-  onTheAir: () => list('tv', '/tv/on_the_air', 'tmdb:ontheair:tv'),
+  trendingMovies: () => (keyless() ? cinemetaRows.popularMovies() : list('movie', '/trending/movie/week', 'tmdb:trending:movie')),
+  trendingTv: () => (keyless() ? cinemetaRows.popularTv() : list('tv', '/trending/tv/week', 'tmdb:trending:tv')),
+  popularMovies: () => (keyless() ? cinemetaRows.popularMovies() : list('movie', '/movie/popular', 'tmdb:popular:movie')),
+  popularTv: () => (keyless() ? cinemetaRows.featuredTv() : list('tv', '/tv/popular', 'tmdb:popular:tv')),
+  topRatedMovies: () => (keyless() ? cinemetaRows.featuredMovies() : list('movie', '/movie/top_rated', 'tmdb:toprated:movie')),
+  nowPlaying: () => (keyless() ? cinemetaRows.newMovies() : list('movie', '/movie/now_playing', 'tmdb:nowplaying:movie')),
+  onTheAir: () => (keyless() ? cinemetaRows.newTv() : list('tv', '/tv/on_the_air', 'tmdb:ontheair:tv')),
 };
 
-export async function tmdbGenres(kind: 'movie' | 'tv'): Promise<TmdbGenre[]> {
+export async function tmdbGenres(kind: 'movie' | 'tv'): Promise<{ id: number | string; name: string }[]> {
+  if (keyless()) return cinemetaGenres(kind);
   const map = await genreMap(kind);
   return [...map.entries()].map(([id, name]) => ({ id, name }));
 }
@@ -167,6 +185,7 @@ export async function tmdbBrowse(
   kind: 'movie' | 'tv',
   opts: { genre?: string; sort?: string; page?: number },
 ): Promise<CatalogItem[]> {
+  if (keyless()) return cinemetaBrowse(kind, opts);
   const params: Record<string, string | number> = {
     page: opts.page ?? 1,
     sort_by: opts.sort ?? 'popularity.desc',
@@ -179,13 +198,14 @@ export async function tmdbBrowse(
 }
 
 export async function tmdbSearch(kind: 'movie' | 'tv', query: string): Promise<CatalogItem[]> {
+  if (keyless()) return cinemetaSearch(kind, query);
   const data = await tmdb<TmdbList>(`/search/${kind}`, { query, include_adult: 'false' });
   return mapList(data, kind);
 }
 
-/** IMDb id -> Nova media id ('movie:603' / 'tv:1399'), via TMDB's find endpoint. */
-export async function tmdbFindByImdb(imdbId: string): Promise<string | null> {
-  if (!integration('tmdbApiKey')) return null;
+/** IMDb id -> Nova media id ('movie:603' / 'tv:1399', or 'movie:tt…' without a TMDB key). */
+export async function tmdbFindByImdb(imdbId: string, hint?: 'movie' | 'tv'): Promise<string | null> {
+  if (keyless()) return cinemetaFindByImdb(imdbId, hint);
   return cached(`tmdb:find:${imdbId}`, 7 * DAY, async () => {
     const data = await tmdb<{ movie_results?: { id: number }[]; tv_results?: { id: number }[] }>(`/find/${imdbId}`, {
       external_source: 'imdb_id',
@@ -277,6 +297,7 @@ async function tmdbRelations(
 }
 
 export async function tmdbDetail(kind: 'movie' | 'tv', id: string): Promise<CatalogDetail> {
+  if (isImdbId(id) || keyless()) return cinemetaDetail(kind, id);
   return cached(`tmdb:detail:${kind}:${id}`, DAY, async () => {
     const genres = await genreMap(kind);
     if (kind === 'movie') {
@@ -334,6 +355,7 @@ export async function tmdbDetail(kind: 'movie' | 'tv', id: string): Promise<Cata
 }
 
 export async function tmdbEpisodes(id: string, season: number): Promise<Episode[]> {
+  if (isImdbId(id)) return cinemetaEpisodes(id, season);
   return cached(`tmdb:season:${id}:${season}`, DAY, async () => {
     const data = await tmdb<TmdbSeason>(`/tv/${id}/season/${season}`);
     return (data.episodes ?? []).map((e) => ({
@@ -352,6 +374,7 @@ export async function tmdbEpisodes(id: string, season: number): Promise<Episode[
 export async function tmdbTvSeasons(
   id: string,
 ): Promise<{ season: number; episodeCount: number; year: number | null }[]> {
+  if (isImdbId(id)) return cinemetaTvSeasons(id);
   return cached(`tmdb:seasons:${id}`, DAY, async () => {
     const t = await tmdb<TmdbTvDetail>(`/tv/${id}`);
     return (t.seasons ?? [])

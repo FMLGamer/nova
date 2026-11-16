@@ -15,7 +15,7 @@ import { signToken, verifyToken, randomToken } from '../lib/crypto.js';
 import { HttpError } from '../lib/http.js';
 import { asyncHandler } from '../lib/async.js';
 
-export const VERSION = '2.1.0';
+export const VERSION = '2.2.0';
 
 export const systemRouter = Router();
 
@@ -190,7 +190,8 @@ export function engineGateway(app: express.Express) {
       return;
     }
     const rest = req.url;
-    if (!rest.startsWith('/stream/') && !rest.startsWith('/api/play/')) {
+    // Casting from a paired site happens here too: this computer is the one on the TV's network.
+    if (!rest.startsWith('/stream/') && !rest.startsWith('/api/play/') && !rest.startsWith('/api/cast/')) {
       res.status(404).json({ error: 'Not available through the engine' });
       return;
     }

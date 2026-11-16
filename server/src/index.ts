@@ -37,6 +37,7 @@ import { scheduleBackups } from './services/backups.js';
 import { seedLocalProvider } from './services/assistant/providers.js';
 import { handleRoomUpgrade } from './services/rooms.js';
 import { VERSION, engineGateway, engineRouter, pairingsRouter, systemRouter } from './routes/system.js';
+import { castMediaRouter, castRouter } from './cast/routes.js';
 
 // A torrent-library hiccup must never take down the whole server for all users.
 process.on('uncaughtException', (err) => console.error('[nova] uncaughtException:', err));
@@ -77,7 +78,7 @@ app.use(
       directives: {
         'img-src': ["'self'", 'data:', 'blob:', 'https:'],
         'media-src': ["'self'", 'blob:', 'data:', ...engineHosts],
-        'script-src': ["'self'", "'wasm-unsafe-eval'"],
+        'script-src': ["'self'", "'wasm-unsafe-eval'", 'https://www.gstatic.com'],
         'style-src': ["'self'", "'unsafe-inline'"],
         'font-src': ["'self'", 'data:'],
         'connect-src': ["'self'", 'blob:', ...engineHosts, ...trackerHosts],
@@ -95,7 +96,7 @@ app.use(
 app.use(
   compression({
     filter: (req, res) => {
-      if (req.path.startsWith('/stream/') || req.path.startsWith('/live/')) return false;
+      if (req.path.startsWith('/stream/') || req.path.startsWith('/live/') || req.path.startsWith('/cast/')) return false;
       if (String(res.getHeader('Content-Type') ?? '').includes('text/event-stream')) return false;
       return compression.filter(req, res);
     },
@@ -131,10 +132,13 @@ app.use('/api/shares', sharesRouter);
 app.use('/api/share', guestRouter);
 app.use('/api/assistant', assistantRouter);
 app.use('/api/subtitles', subtitleToolsRouter);
+app.use('/api/cast', castRouter);
 
 // Large binary responses live outside /api.
 app.use('/stream', streamRouter);
 app.use('/live', liveProxyRouter);
+// What TVs fetch while casting (capability URLs, no cookies).
+app.use('/cast', castMediaRouter);
 
 // Any unmatched /api path is a genuine 404 (never fall through to the SPA).
 app.use('/api', (_req, res) => {

@@ -125,6 +125,13 @@ export const api = {
     subtitles: (q: { imdbId?: string; query?: string; season?: number; episode?: number; languages?: string; kind?: 'movie' | 'episode' }) =>
       get<{ subtitles: T.SubtitleOption[] }>('/api/catalog/subtitles', q).then((r) => r.subtitles),
     subtitleUrl: (fileId: number) => `/api/catalog/subtitles/file/${fileId}`,
+    pluginSubtitles: (q: { mediaId: string; season?: number | null; episode?: number | null }) =>
+      get<{ subtitles: { token: string; language: string; release: string; plugin: string }[] }>('/api/catalog/subtitles/sources', {
+        mediaId: q.mediaId,
+        ...(q.season != null ? { season: q.season } : {}),
+        ...(q.episode != null ? { episode: q.episode } : {}),
+      }).then((r) => r.subtitles),
+    pluginSubtitleUrl: (token: string) => `/api/catalog/subtitles/plugin/${token}`,
     resolve: (id: string, type: string) => get<{ mediaId: string | null }>('/api/catalog/resolve', { id, type }).then((r) => r.mediaId),
   },
 
@@ -155,6 +162,7 @@ export const api = {
     createToken: (name: string) => post<{ token: string }>('/api/me/tokens', { name }).then((r) => r.token),
     deleteToken: (id: string) => del(`/api/me/tokens/${id}`),
     upnext: () => get<{ items: T.UpNext[] }>('/api/me/upnext').then((r) => r.items),
+    dismissUpNext: (itemKey: string) => post('/api/me/upnext/dismiss', { itemKey }),
     history: (offset = 0, limit = 60) => get<{ items: T.Progress[] }>('/api/me/history', { offset, limit }).then((r) => r.items),
     clearHistory: () => post('/api/me/history/clear'),
     calendar: (from: number, to: number, scope: 'followed' | 'list' | 'watching') =>

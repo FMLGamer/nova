@@ -246,7 +246,7 @@ function parseSize(text: string): number {
 }
 
 function parseSeeders(text: string): number {
-  const m = text.match(/(?:👤|seeds?|seeders?)[:\s]*([\d,]+)/i);
+  const m = text.match(/(?:👤|👥|🌱|⬆️?|seeds?|seeders?|peers?)[:\s]*([\d,]+)/i);
   return m ? Number(m[1]!.replace(/,/g, '')) : 0;
 }
 

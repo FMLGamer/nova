@@ -20,10 +20,26 @@ function webtorrentWorker(): Plugin {
   };
 }
 
+/**
+ * JASSUB asks for a `desynchronized` (low-latency, front-buffer) canvas. Over a <video> on
+ * Windows Chromium that canvas fights the video's hardware overlay: the subtitles or the
+ * whole picture flicker or go black (ThaUnknown/jassub#70). A normal canvas is plenty fast.
+ */
+function jassubSynchronized(): Plugin {
+  return {
+    name: 'nova-jassub-synchronized',
+    transform(code, id) {
+      if (!/[\\/]jassub[\\/]dist[\\/]worker[\\/]/.test(id) || !code.includes('desynchronized')) return null;
+      return { code: code.replace(/desynchronized:\s*true/g, 'desynchronized: false'), map: null };
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    jassubSynchronized(),
     webtorrentWorker(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -42,7 +58,7 @@ export default defineConfig({
       workbox: {
         // Never let the service worker answer API, media or socket routes.
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api/, /^\/stream/, /^\/live\//, /^\/ws/, /^\/healthz/, /^\/readyz/, /^\/webtorrent\//, /^\/engine\//],
+        navigateFallbackDenylist: [/^\/api/, /^\/stream/, /^\/live\//, /^\/ws/, /^\/healthz/, /^\/readyz/, /^\/webtorrent\//, /^\/engine\//, /^\/cast\//],
         importScripts: ['/webtorrent-sw.js'],
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
         // Big, rarely-needed engines (HLS/TS live video, PDF, EPUB) load on demand instead of on install.
@@ -63,7 +79,7 @@ export default defineConfig({
   },
   // jassub finds its worker and wasm via `new URL(..., import.meta.url)`, which pre-bundling would break.
   optimizeDeps: { exclude: ['jassub'] },
-  worker: { format: 'es' },
+  worker: { format: 'es', plugins: () => [jassubSynchronized()] },
   build: {
     outDir: 'dist',
     sourcemap: false,

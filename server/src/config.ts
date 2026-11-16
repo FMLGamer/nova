@@ -56,6 +56,15 @@ export const config = {
   torrentMode: (env('TORRENT_MODE', 'server') === 'client' ? 'client' : 'server') as 'server' | 'client',
   // Port the Nova desktop app's local engine listens on (web clients look for it here).
   enginePort: Number(env('ENGINE_PORT', '11471')),
+  // Casting: TVs fetch the stream from this machine. The desktop app (bound to loopback) opens
+  // this extra LAN port for cast streams only; a server serves them on its normal port (0).
+  castPort: Number(env('CAST_PORT', MODE === 'desktop' ? '11472' : '0')),
+  // TVs to offer even when discovery can't see them (a server in a container, a separate VLAN):
+  // "chromecast:192.168.1.40, dlna:http://192.168.1.41:9197/dmr" (DLNA = the device description URL).
+  castDevices: env('CAST_DEVICES', '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
   // Where client-mode users are sent to get the desktop app.
   desktopDownloadUrl: env('DESKTOP_DOWNLOAD_URL', 'https://github.com/FMLGamer/nova/releases/latest'),
   webDir: env('WEB_DIR', path.resolve(process.cwd(), '..', 'dist')),

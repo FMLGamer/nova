@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   AudioLines,
   Captions,
+  Cast,
   ChevronRight,
   Copy,
   Download,
@@ -43,6 +44,8 @@ import { useEnhancer, type EnhanceMode } from './enhance';
 import { useAssRenderer } from './ass';
 import { useRoom } from './room';
 import { cueStyle, cuesAt, useSubtitleTrack, type SubtitleSource } from './subtitles';
+import { CastDevices, CastRemote, type ActiveCast, type CastPick } from './Cast';
+import { browserCast, castApi, type CastSubtitle } from '../../lib/cast';
 
 export interface Playable {
   /** "t/<hash>/<idx>" | "l/<id>" | "u/<token>" — empty for offline copies. */
@@ -83,11 +86,10 @@ export interface PlayerProps {
 }
 
 type Mode = 'direct' | 'remux' | 'transcode';
-type Panel = 'episodes' | 'subtitles' | 'audio' | 'settings' | 'room' | null;
+type Panel = 'episodes' | 'subtitles' | 'audio' | 'settings' | 'room' | 'cast' | null;
 
 const BROWSER_AUDIO = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'mp2']);
 const TEXT_SUBS = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text', 'stl']);
-const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const SLEEP = [0, 15, 30, 45, 60, 90, -1];
 
 function videoCodecPlayable(codec: string): boolean {
@@ -147,6 +149,12 @@ export function Player(p: PlayerProps) {
   const box = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoEl, setVideoEl] = useState<HTMLVideoElement | null>(null);
+  // Must stay the same function: a new ref callback each render detaches and reattaches the
+  // element, which tore down everything keyed on it (the subtitle renderer) several times a second.
+  const attachVideo = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    setVideoEl(el);
+  }, []);
   const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null);
 
   const [mode, setMode] = useState<Mode>(() => (transcodeAllowed && prefs?.ui.transcode && !isOffline ? 'transcode' : 'direct'));
@@ -182,6 +190,8 @@ export function Player(p: PlayerProps) {
   const [osResults, setOsResults] = useState<SubtitleOption[] | null>(null);
   const [osLoading, setOsLoading] = useState(false);
   const [chatText, setChatText] = useState('');
+  const [cast, setCast] = useState<ActiveCast | null>(null);
+  const [castBusy, setCastBusy] = useState<string | null>(null);
   const subPicked = useRef(false);
   const hoverChrome = useRef(false);
   const hideTimer = useRef<number>(0);
@@ -357,6 +367,31 @@ export function Player(p: PlayerProps) {
     else box.current?.requestFullscreen().catch(() => undefined);
   };
 
+  // Mouse: click toggles play, double-click toggles fullscreen (the first click of a double is
+  // held back so it doesn't pause). Touch: a tap shows or hides the controls.
+  const clickTimer = useRef(0);
+  const lastPointer = useRef<string>('mouse');
+  const chromeAtDown = useRef(false);
+  const onSurfaceClick = (e: React.MouseEvent) => {
+    if (e.detail >= 2) {
+      window.clearTimeout(clickTimer.current);
+      clickTimer.current = 0;
+      if (e.detail === 2) toggleFullscreen();
+      return;
+    }
+    if (lastPointer.current === 'touch') {
+      if (chromeAtDown.current && !panel) setChrome(false);
+      return;
+    }
+    window.clearTimeout(clickTimer.current);
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = 0;
+      if (panel) return setPanel(null);
+      togglePlay();
+      broadcast(videoRef.current?.paused ? 'pause' : 'play');
+    }, 220);
+  };
+
   const togglePip = async () => {
     const v = videoRef.current;
     if (!v) return;
@@ -506,16 +541,30 @@ export function Player(p: PlayerProps) {
     async (languages: string) => {
       setOsLoading(true);
       try {
-        const configured = await api.catalog.subtitlesStatus();
-        if (!configured) return [];
-        const list = await api.catalog.subtitles({
-          imdbId: p.detail?.imdbId ?? undefined,
-          query: p.title,
-          season: p.mediaType === 'anime' ? undefined : (p.season ?? undefined),
-          episode: p.episode ?? undefined,
-          languages,
-          kind: p.episode != null ? 'episode' : 'movie',
-        });
+        const wanted = languages.split(',').filter(Boolean);
+        const [configured, fromPlugins] = await Promise.all([
+          api.catalog.subtitlesStatus().catch(() => false),
+          api.catalog.pluginSubtitles({ mediaId: p.mediaId, season: p.mediaType === 'anime' ? null : p.season, episode: p.episode }).catch(() => []),
+        ]);
+        const builtin = configured
+          ? await api.catalog
+              .subtitles({
+                imdbId: p.detail?.imdbId ?? undefined,
+                query: p.title,
+                season: p.mediaType === 'anime' ? undefined : (p.season ?? undefined),
+                episode: p.episode ?? undefined,
+                languages,
+                kind: p.episode != null ? 'episode' : 'movie',
+              })
+              .catch(() => [] as SubtitleOption[])
+          : [];
+        // Plugins answer for every language at once: keep yours, in the order you listed them.
+        const extra: SubtitleOption[] = fromPlugins
+          .filter((s) => !wanted.length || wanted.some((l) => matchesLanguage(l, s.language)))
+          .sort((a, b) => wanted.findIndex((l) => matchesLanguage(l, a.language)) - wanted.findIndex((l) => matchesLanguage(l, b.language)))
+          .slice(0, 30)
+          .map((s) => ({ fileId: 0, language: s.language, release: s.release, match: 'exact', url: api.catalog.pluginSubtitleUrl(s.token), provider: s.plugin }));
+        const list = [...builtin, ...extra];
         setOsResults(list);
         return list;
       } catch {
@@ -525,9 +574,14 @@ export function Player(p: PlayerProps) {
         setOsLoading(false);
       }
     },
-    [p.detail?.imdbId, p.title, p.mediaType, p.season, p.episode],
+    [p.detail?.imdbId, p.title, p.mediaType, p.mediaId, p.season, p.episode],
   );
-  const osSource = (o: SubtitleOption): SubtitleSource => ({ id: `os${o.fileId}`, label: `${langName(o.language)} · ${o.release}`, lang: o.language, url: api.catalog.subtitleUrl(o.fileId) });
+  const osSource = (o: SubtitleOption): SubtitleSource => ({
+    id: o.url ? `pl${o.url.slice(o.url.lastIndexOf('/') + 1)}` : `os${o.fileId}`,
+    label: `${langName(o.language)} · ${o.release}`,
+    lang: o.language,
+    url: o.url ?? api.catalog.subtitleUrl(o.fileId),
+  });
   const translated = (base: SubtitleSource, target: string): SubtitleSource => ({
     ...base,
     id: `${base.id}>${target}`,
@@ -643,6 +697,7 @@ export function Player(p: PlayerProps) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey) return;
+      if (cast) return;
       const v = videoRef.current;
       if (!v) return;
       const k = e.key.toLowerCase();
@@ -734,6 +789,76 @@ export function Player(p: PlayerProps) {
     }
   };
 
+  // -------------------------------------------------------------- casting
+  const castBase = playable.api ?? '';
+  const castSubtitle = async (): Promise<CastSubtitle> => {
+    const s = subChoice;
+    if (!s) return null;
+    if (s.mkv && !s.transform) return { kind: 'embedded', track: s.mkv.track };
+    // Anything else goes to the TV as finished WebVTT text.
+    const res = await fetch(s.url, { credentials: /^https?:/.test(s.url) ? 'omit' : 'include' });
+    if (!res.ok) throw new Error('Could not load the subtitles for casting');
+    const text = s.transform ? await s.transform(await res.text()) : await res.text();
+    return { kind: 'text', vtt: text, language: s.lang, label: s.label };
+  };
+  const startCast = async (pick: CastPick) => {
+    if (!playable.src) return;
+    setCastBusy(pick.kind === 'browser' ? 'browser' : pick.device.id);
+    try {
+      // The browser's device picker must open straight from the click.
+      const handle = pick.kind === 'browser' ? await browserCast() : undefined;
+      const image = p.detail?.backdrop ?? p.detail?.poster ?? null;
+      const started = await castApi(castBase).start({
+        device: pick.kind === 'browser' ? 'browser' : pick.device.id,
+        source: playable.src,
+        audioTrack: audioTrack ?? (tracks?.audio.find((a) => a.default) ?? tracks?.audio[0])?.index ?? 0,
+        start: Math.max(0, timeRef.current - 2),
+        subtitle: await castSubtitle(),
+        title: p.title,
+        subtitleLine: subtitleLine || null,
+        image: image && /^https?:/.test(image) ? image : null,
+      });
+      if (handle && started.url) {
+        await handle.load(started.url, {
+          duration: started.duration ? started.duration - started.offset : null,
+          title: p.title,
+          subtitle: subtitleLine || null,
+          image,
+          subtitles: Boolean(started.subtitles),
+        });
+      }
+      videoRef.current?.pause();
+      setPanel(null);
+      setCast({
+        id: started.id,
+        base: castBase,
+        deviceName: handle?.deviceName ?? (pick.kind === 'device' ? pick.device.name : 'TV'),
+        offset: started.offset,
+        duration: started.duration,
+        browser: handle,
+      });
+    } catch (e) {
+      toast(errorText(e), 'bad');
+    } finally {
+      setCastBusy(null);
+    }
+  };
+  const stopCast = async (position: number) => {
+    const c = cast;
+    setCast(null);
+    if (!c) return;
+    c.browser?.stop();
+    await castApi(c.base).stop(c.id).catch(() => undefined);
+    seekTo(position);
+  };
+  const onCastProgress = useCallback(
+    (position: number, d: number, ended: boolean) => {
+      if (d > 0) p.onProgress(Math.floor(position), Math.floor(d), ended || position / d > 0.92);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
   return (
     <div
       ref={box}
@@ -742,20 +867,17 @@ export function Player(p: PlayerProps) {
       className={cls('fixed inset-0 z-[60] overflow-hidden bg-black select-none', !chromeOn && 'cursor-hidden')}
     >
       <video
-        ref={(el) => {
-          videoRef.current = el;
-          if (el !== videoEl) setVideoEl(el);
-        }}
+        ref={attachVideo}
         key={videoSrc}
         src={videoSrc}
         autoPlay
         playsInline
         crossOrigin={playable.blobUrl ? undefined : 'use-credentials'}
-        onClick={() => {
-          togglePlay();
-          broadcast(videoRef.current?.paused ? 'pause' : 'play');
+        onPointerDown={(e) => {
+          lastPointer.current = e.pointerType;
+          chromeAtDown.current = chromeOn;
         }}
-        onDoubleClick={toggleFullscreen}
+        onClick={onSurfaceClick}
         onLoadedMetadata={onLoaded}
         onDurationChange={(e) => setVideoDuration(Number.isFinite(e.currentTarget.duration) ? e.currentTarget.duration : 0)}
         onTimeUpdate={(e) => setT(e.currentTarget.currentTime)}
@@ -969,12 +1091,13 @@ export function Player(p: PlayerProps) {
       </AnimatePresence>
 
       {/* chrome */}
-      <motion.div animate={{ opacity: chromeOn ? 1 : 0 }} transition={{ duration: 0.25 }} className={cls('absolute inset-0 z-20', !chromeOn && 'pointer-events-none')}>
-        <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/80 to-transparent" />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
+      {/* Only the bars take pointer events, so clicks in the middle reach the video. */}
+      <motion.div animate={{ opacity: chromeOn ? 1 : 0 }} transition={{ duration: 0.25 }} className="pointer-events-none absolute inset-0 z-20">
+        <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/80 to-transparent" />
+        <div className="absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
 
         <div
-          className="absolute inset-x-0 top-0 flex items-center gap-3 px-4 pt-safe-5 sm:px-8 sm:pt-safe-7"
+          className={cls('absolute inset-x-0 top-0 flex items-center gap-3 px-4 pt-safe-5 sm:px-8 sm:pt-safe-7', chromeOn && 'pointer-events-auto')}
           onPointerEnter={() => (hoverChrome.current = true)}
           onPointerLeave={() => (hoverChrome.current = false)}
         >
@@ -999,7 +1122,7 @@ export function Player(p: PlayerProps) {
         </div>
 
         <div
-          className="absolute inset-x-0 bottom-0 px-4 pb-safe-4 sm:px-8 sm:pb-safe-6"
+          className={cls('absolute inset-x-0 bottom-0 px-4 pb-safe-4 sm:px-8 sm:pb-safe-6', chromeOn && 'pointer-events-auto')}
           onPointerEnter={() => (hoverChrome.current = true)}
           onPointerLeave={() => (hoverChrome.current = false)}
         >
@@ -1100,6 +1223,11 @@ export function Player(p: PlayerProps) {
             <button onClick={() => setPanel(panel === 'settings' ? null : 'settings')} aria-label="Settings" className={cls('grid size-10 place-items-center rounded-full hover:bg-white/10', panel === 'settings' && 'bg-white/15')}>
               <Settings2 className="size-5" />
             </button>
+            {!isOffline && !p.roomCode && (
+              <button onClick={() => setPanel(panel === 'cast' ? null : 'cast')} aria-label="Cast to a TV" className={cls('grid size-10 place-items-center rounded-full hover:bg-white/10', panel === 'cast' && 'bg-white/15')}>
+                <Cast className="size-5" />
+              </button>
+            )}
             <button onClick={togglePip} aria-label="Picture in picture" className="grid size-10 place-items-center rounded-full hover:bg-white/10 max-sm:hidden">
               <PictureInPicture2 className="size-5" />
             </button>
@@ -1112,6 +1240,11 @@ export function Player(p: PlayerProps) {
 
       {/* panels */}
       <AnimatePresence>
+        {panel === 'cast' && (
+          <Panel title="Cast to a TV" onClose={() => setPanel(null)}>
+            <CastDevices base={playable.api ?? ''} allowBrowser={!playable.api} busy={castBusy} onPick={(pick) => void startCast(pick)} />
+          </Panel>
+        )}
         {panel === 'episodes' && (
           <Panel title={p.mediaType === 'anime' ? 'Episodes' : `Season ${p.season ?? 1}`} onClose={() => setPanel(null)}>
             <div className="space-y-1">
@@ -1153,15 +1286,17 @@ export function Player(p: PlayerProps) {
                 <Spinner className="size-4" /> Searching…
               </div>
             )}
-            {osResults?.slice(0, 12).map((o) => {
+            {osResults?.slice(0, 16).map((o) => {
               const s = osSource(o);
               return (
-                <Option key={s.id} active={subChoice?.id === s.id} onClick={() => setSubChoice(s)} hint={o.match === 'exact' ? 'Exact' : undefined}>
+                <Option key={s.id} active={subChoice?.id === s.id} onClick={() => setSubChoice(s)} hint={o.provider ?? (o.match === 'exact' ? 'Exact' : undefined)}>
                   {s.label}
                 </Option>
               );
             })}
-            {osResults && !osResults.length && !osLoading && <p className="px-3 py-1 text-xs text-faint">No online subtitles (or OpenSubtitles isn't configured).</p>}
+            {osResults && !osResults.length && !osLoading && (
+              <p className="px-3 py-1 text-xs text-faint">No online subtitles found. Install a subtitles plugin (such as OpenSubtitles v3) under Server → Plugins, or add an OpenSubtitles key.</p>
+            )}
             {subChoice && !matchesLanguage(subLang, subChoice.lang) && !subChoice.transform && (
               <>
                 <Heading>Translate</Heading>
@@ -1237,19 +1372,31 @@ export function Player(p: PlayerProps) {
                 <Gauge className="size-3.5" /> Speed
               </span>
             </Heading>
-            <div className="flex flex-wrap gap-1.5 px-3">
-              {SPEEDS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
+            <div className="flex items-center gap-2 px-3">
+              <div className="flex-1">
+                <Slider
+                  label="Playback speed"
+                  value={rate}
+                  min={0.25}
+                  max={3}
+                  step={0.05}
+                  onChange={(s) => {
                     if (videoRef.current) videoRef.current.playbackRate = s;
                     broadcast('rate');
                   }}
-                  className={cls('rounded-lg px-3 py-1.5 text-sm', rate === s ? 'bg-white text-black' : 'bg-white/8 hover:bg-white/12')}
-                >
-                  {s}×
-                </button>
-              ))}
+                  format={(s) => `${s.toFixed(2)}×`}
+                />
+              </div>
+              <button
+                onClick={() => {
+                  if (videoRef.current) videoRef.current.playbackRate = 1;
+                  broadcast('rate');
+                }}
+                disabled={rate === 1}
+                className="rounded-lg bg-white/8 px-2.5 py-1 text-xs hover:bg-white/12 disabled:opacity-40"
+              >
+                Reset
+              </button>
             </div>
 
             <Heading>
@@ -1332,7 +1479,8 @@ export function Player(p: PlayerProps) {
                 }}
                 hint={<Users className="size-4" />}
               >
-                Watch together
+                <span className="block">Watch together</span>
+                <span className="block whitespace-normal text-xs text-faint">Everyone has to be signed in on this same Nova server.</span>
               </Option>
             )}
             {!isOffline && (
@@ -1426,6 +1574,7 @@ export function Player(p: PlayerProps) {
               >
                 <Copy className="size-3.5" /> Copy invite link
               </button>
+              <p className="mt-3 text-xs text-faint">Only works for people with an account on this server ({location.host}). Nova apps on other servers can't join.</p>
             </div>
             <div className="mt-3 flex flex-wrap gap-2 px-2">
               {room.members.map((m) => (
@@ -1467,6 +1616,20 @@ export function Player(p: PlayerProps) {
               </form>
             </div>
           </Panel>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {cast && (
+          <CastRemote
+            cast={cast}
+            title={p.title}
+            subtitle={subtitleLine || null}
+            backdrop={p.detail?.backdrop ?? p.detail?.poster ?? null}
+            onStop={(pos) => void stopCast(pos)}
+            onProgress={onCastProgress}
+            onRestarted={(offset) => setCast((c) => (c ? { ...c, offset } : c))}
+          />
         )}
       </AnimatePresence>
     </div>

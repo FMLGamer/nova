@@ -13,6 +13,7 @@ import { cachedSubtitle, extractSubtitle } from '../services/subtitleCache.js';
 import { embeddedTrackVtt, mkvInfo, streamEmbeddedTrack } from '../services/embeddedSubs.js';
 import { isFont } from '../media/matroska.js';
 import { ffInput, probeTracks, resolveSource, type MediaSource } from '../streaming/source.js';
+import { wireCastMedia } from '../cast/media.js';
 
 export const streamRouter = Router();
 
@@ -150,6 +151,8 @@ function serveRange(req: Request, res: Response, src: MediaSource, onRange?: (st
 }
 
 // ---------------------------------------------------------------- ffmpeg pipelines
+
+wireCastMedia(internalUrl, serveRange);
 
 function seekableInput(ctx: StreamCtx, startSec: number): { args: string[]; stdin: Readable | null } {
   if (startSec <= 0) return ffInput(ctx.src);

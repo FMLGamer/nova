@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { Children, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Check, ChevronLeft, ChevronRight, Play, Plus, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Info, Play, Plus, X } from 'lucide-react';
 import { cls, episodeLabel, fmtLeft, fmtRuntime, kindLabel, titlePath, watchPath } from '../lib/format';
 import { useListToggle, useSummary } from '../lib/queries';
 import type { CatalogItem } from '../lib/types';
@@ -91,6 +91,8 @@ export function WideCard({
   subtitle,
   progress,
   onRemove,
+  removeLabel = 'Remove from Continue Watching',
+  detailsTo,
   badge,
 }: {
   to: string;
@@ -99,8 +101,12 @@ export function WideCard({
   subtitle?: ReactNode;
   progress?: number;
   onRemove?: () => void;
+  removeLabel?: string;
+  /** The title page, opened on this episode. */
+  detailsTo?: string;
   badge?: ReactNode;
 }) {
+  const navigate = useNavigate();
   return (
     <Link to={to} className="group/card block w-full shrink-0 outline-none" draggable={false}>
       <div className="relative aspect-video overflow-hidden rounded-2xl bg-ink-800 ring-1 ring-white/6 transition-[translate,box-shadow] duration-200 ease-snap group-hover/card:-translate-y-1 group-hover/card:ring-white/20 group-focus-visible/card:ring-2 group-focus-visible/card:ring-accent">
@@ -112,19 +118,36 @@ export function WideCard({
           </span>
         </div>
         {badge && <div className="absolute top-2.5 left-2.5">{badge}</div>}
-        {onRemove && (
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onRemove();
-            }}
-            aria-label="Remove from Continue Watching"
-            className="absolute top-2 right-2 grid size-7 place-items-center rounded-full bg-black/60 text-white/80 opacity-0 backdrop-blur transition-opacity group-hover/card:opacity-100 hover:text-white max-sm:opacity-100"
-          >
-            <X className="size-4" />
-          </button>
-        )}
+        <div className="absolute top-2 right-2 flex gap-1.5 opacity-0 transition-opacity group-hover/card:opacity-100 max-sm:opacity-100">
+          {detailsTo && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                navigate(detailsTo);
+              }}
+              aria-label="Details"
+              title="Details"
+              className="grid size-7 place-items-center rounded-full bg-black/60 text-white/80 backdrop-blur hover:text-white"
+            >
+              <Info className="size-4" />
+            </button>
+          )}
+          {onRemove && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onRemove();
+              }}
+              aria-label={removeLabel}
+              title={removeLabel}
+              className="grid size-7 place-items-center rounded-full bg-black/60 text-white/80 backdrop-blur hover:text-white"
+            >
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
         <div className="absolute inset-x-3 bottom-2.5">
           <div className="truncate text-sm font-semibold">{title}</div>
           {subtitle && <div className="truncate text-xs text-white/70">{subtitle}</div>}

@@ -38,8 +38,12 @@ export function useAssRenderer(opts: {
   };
 
   const fontKey = fonts.join('|');
+  const videoRef = useRef(video);
+  videoRef.current = video;
+  const hasVideo = Boolean(video);
   useEffect(() => {
-    if (!enabled || !video || !host || !header) return;
+    const v = videoRef.current;
+    if (!enabled || !v || !host || !header) return;
     let cancelled = false;
     let j: JASSUB | null = null;
     // A canvas can only be handed to one worker, and destroy() removes it: one per instance.
@@ -50,7 +54,16 @@ export function useAssRenderer(opts: {
     (async () => {
       const { default: Renderer } = await import('jassub');
       if (cancelled) return;
-      j = new Renderer({ video, canvas, subContent: header, fonts, timeOffset: offset.current, queryFonts: false });
+      j = new Renderer({
+        video: v,
+        canvas,
+        subContent: header,
+        fonts,
+        timeOffset: offset.current,
+        queryFonts: false,
+        // Sharp enough on any screen; 4K renders cost ~4x the memory for no visible gain under video.
+        maxRenderHeight: 1440,
+      });
       await j.ready;
       if (cancelled) return;
       inst.current = j;
@@ -66,7 +79,13 @@ export function useAssRenderer(opts: {
       canvas.remove();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, video, host, header, fontKey]);
+  }, [enabled, hasVideo, host, header, fontKey]);
+
+  // A new <video> (another stream mode or a seek in a converted stream) keeps the same renderer.
+  useEffect(() => {
+    const j = inst.current;
+    if (j && video && j._video !== video) void j.setVideo(video);
+  }, [video]);
 
   useEffect(feed, [version]); // eslint-disable-line react-hooks/exhaustive-deps
 

@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
@@ -280,9 +280,13 @@ function DownloadMenu({ detail, intentSeason, intentEpisode }: { detail: Catalog
   );
 }
 
-function EpisodeRow({ ep, detail, progress, onServer }: { ep: Episode; detail: CatalogDetail; progress?: Progress; onServer: boolean }) {
+function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; detail: CatalogDetail; progress?: Progress; onServer: boolean; focused?: boolean }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
+  const rowRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focused) rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [focused]);
   const pct = progress?.durationSeconds ? progress.positionSeconds / progress.durationSeconds : 0;
   const watched = progress?.finished || pct > 0.92;
   const upcoming = ep.airDate ? Date.parse(ep.airDate) > Date.now() : false;
@@ -310,11 +314,12 @@ function EpisodeRow({ ep, detail, progress, onServer }: { ep: Episode; detail: C
   };
   return (
     <motion.div
+      ref={rowRef}
       layout
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       onClick={() => !upcoming && navigate(watchPath({ mediaId: detail.id, season: ep.season, episode: ep.episode }))}
-      className={cls('group flex cursor-pointer gap-4 rounded-2xl p-2.5 transition-colors hover:bg-white/5', upcoming && 'cursor-default opacity-50')}
+      className={cls('group flex cursor-pointer gap-4 rounded-2xl p-2.5 transition-colors hover:bg-white/5', upcoming && 'cursor-default opacity-50', focused && 'bg-white/6 ring-1 ring-accent/60')}
     >
       <div className="relative aspect-video w-36 shrink-0 overflow-hidden rounded-xl bg-ink-800 sm:w-52">
         {ep.still ? <img src={ep.still} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className="grid size-full place-items-center font-display text-2xl text-faint">{ep.episode}</div>}
@@ -358,7 +363,7 @@ function EpisodeRow({ ep, detail, progress, onServer }: { ep: Episode; detail: C
   );
 }
 
-function Episodes({ detail, progress, serverEpisodes, initialSeason }: { detail: CatalogDetail; progress: Progress[]; serverEpisodes: Set<string>; initialSeason: number }) {
+function Episodes({ detail, progress, serverEpisodes, initialSeason, focusEpisode }: { detail: CatalogDetail; progress: Progress[]; serverEpisodes: Set<string>; initialSeason: number; focusEpisode: number | null }) {
   const seasons = detail.mediaType === 'anime' ? [] : detail.seasons.filter((s) => s.episodeCount > 0);
   const [season, setSeason] = useState(initialSeason);
   useEffect(() => setSeason(initialSeason), [initialSeason]);
@@ -367,12 +372,14 @@ function Episodes({ detail, progress, serverEpisodes, initialSeason }: { detail:
   const PAGE = 50;
   const list = episodes ?? [];
   const pages = Math.ceil(list.length / PAGE);
+  const focus = season === initialSeason ? focusEpisode : null;
   useEffect(() => {
-    // Jump to the chunk holding the episode you're on.
-    const p = progress.find((x) => x.season === season || detail.mediaType === 'anime');
-    if (p?.episode && list.length > PAGE) setPage(Math.floor((p.episode - 1) / PAGE));
+    // Jump to the chunk holding the episode you asked for, or the one you're on.
+    const at = focus ?? progress.find((x) => x.season === season || detail.mediaType === 'anime')?.episode;
+    const idx = at ? list.findIndex((e) => e.episode === at) : -1;
+    if (idx >= 0 && list.length > PAGE) setPage(Math.floor(idx / PAGE));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [list.length, season]);
+  }, [list.length, season, focus]);
   const byKey = useMemo(() => new Map(progress.map((p) => [p.itemKey, p])), [progress]);
 
   return (
@@ -413,7 +420,7 @@ function Episodes({ detail, progress, serverEpisodes, initialSeason }: { detail:
       )}
       <div className="grid gap-1 lg:grid-cols-2">
         {list.slice(page * PAGE, (page + 1) * PAGE).map((ep) => (
-          <EpisodeRow key={ep.id} ep={ep} detail={detail} progress={byKey.get(ep.id)} onServer={serverEpisodes.has(`${ep.season}:${ep.episode}`)} />
+          <EpisodeRow key={ep.id} ep={ep} detail={detail} progress={byKey.get(ep.id)} onServer={serverEpisodes.has(`${ep.season}:${ep.episode}`)} focused={focus === ep.episode} />
         ))}
       </div>
       {!isLoading && !list.length && <p className="text-sm text-muted">No episode list yet.</p>}
@@ -457,6 +464,9 @@ const REL_ORDER = ['PREQUEL', 'SEQUEL', 'PARENT', 'SIDE_STORY', 'SPIN_OFF', 'ALT
 
 export function Title() {
   const { type = '', id = '' } = useParams();
+  const [search] = useSearchParams();
+  const focusEpisode = Number(search.get('e')) || null;
+  const focusSeason = focusEpisode ? (type === 'anime' ? 1 : Number(search.get('s')) || 1) : null;
   const mediaId = `${type}:${id}`;
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -662,7 +672,15 @@ export function Title() {
       </section>
 
       <div className="relative z-10 space-y-12 pt-6">
-        {isSeries && <Episodes detail={detail} progress={progress ?? []} serverEpisodes={serverEpisodes} initialSeason={intent?.season ?? (detail.mediaType === 'anime' ? 1 : (detail.seasons.find((s) => s.season >= 1)?.season ?? 1))} />}
+        {isSeries && (
+          <Episodes
+            detail={detail}
+            progress={progress ?? []}
+            serverEpisodes={serverEpisodes}
+            initialSeason={focusSeason ?? intent?.season ?? (detail.mediaType === 'anime' ? 1 : (detail.seasons.find((s) => s.season >= 1)?.season ?? 1))}
+            focusEpisode={focusEpisode}
+          />
+        )}
 
         {relations.length > 0 && (
           <Rail title={detail.mediaType === 'anime' ? 'Related' : 'More like this'}>

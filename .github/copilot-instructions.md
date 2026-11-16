@@ -39,7 +39,15 @@ Nova is a self-hosted media app with three parts:
   - `server/src/media/matroska.ts` reads tracks, chapters and attachments from the header. It pulls subtitle blocks from
     the clusters near a time, using Cues.
   - `services/embeddedSubs.ts` caches blocks per track along with the byte ranges already covered.
-  - ASS tracks render client-side with JASSUB (`src/components/player/ass.ts`).
+  - ASS tracks render client-side with JASSUB (`src/components/player/ass.ts`). Its canvas must not be
+    `desynchronized` (Vite plugin `jassubSynchronized` patches that) and the `<video>` ref callback must stay stable,
+    or the renderer is torn down every render.
+- **Metadata:** TMDB when a key is set, otherwise Cinemeta (`services/cinemeta.ts`, ids `movie:tt…`/`tv:tt…`;
+  `services/tmdb.ts` delegates). Anime: AniList + ani.zip (`services/anizip.ts`) for episodes and cross-ids.
+- **Casting** (`server/src/cast/`): mDNS/SSDP discovery, a minimal Cast v2 sender and a DLNA SOAP client. Streams are
+  HLS from ffmpeg (`-copyts`, TS offset 10s) with a WebVTT rendition; ASS is burned in with the `ass` filter, in chunks
+  that follow the subtitle reader on torrents. TVs fetch `/cast/<token>/…` (capability URLs, CORS `*`); the Windows
+  app serves those on a separate LAN port.
 
 ## Conventions
 

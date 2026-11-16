@@ -66,9 +66,10 @@ export function itemKeyFor(mediaId: string, season: number | null | undefined, e
 
 export const mediaTypeOf = (mediaId: string): MediaType => (mediaId.split(':')[0] as MediaType) ?? 'movie';
 
-export const titlePath = (mediaId: string) => {
+export const titlePath = (mediaId: string, at?: { season?: number | null; episode?: number | null }) => {
   const [t, id] = mediaId.split(':');
-  return `/title/${t}/${id}`;
+  if (at?.episode == null) return `/title/${t}/${id}`;
+  return `/title/${t}/${id}?${at.season != null ? `s=${at.season}&` : ''}e=${at.episode}`;
 };
 
 export interface WatchTarget {

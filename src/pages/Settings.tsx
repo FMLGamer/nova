@@ -114,14 +114,8 @@ function PlaybackSection({ p, set }: { p: Preferences; set: (x: object) => void 
         <Row label="Skip credits automatically" hint="Jumps straight to the next episode when there is one.">
           <Switch checked={ui.skipCreditsAutomatically} onChange={(v) => set({ ui: { skipCreditsAutomatically: v } })} />
         </Row>
-        <Row label="Default speed">
-          <Select value={ui.playbackSpeed} onChange={(e) => set({ ui: { playbackSpeed: Number(e.target.value) } })} className="w-28">
-            {[0.75, 1, 1.25, 1.5, 2].map((s) => (
-              <option key={s} value={s}>
-                {s}×
-              </option>
-            ))}
-          </Select>
+        <Row label="Default speed" stack>
+          <Slider value={ui.playbackSpeed} min={0.25} max={3} step={0.05} onChange={(v) => set({ ui: { playbackSpeed: Math.round(v * 100) / 100 } })} format={(v) => `${v.toFixed(2)}×`} />
         </Row>
       </Group>
       <Group title="Picture">

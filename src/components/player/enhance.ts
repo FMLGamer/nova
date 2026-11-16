@@ -126,7 +126,8 @@ export function useEnhancer(
 ) {
   useEffect(() => {
     if (!video || !canvas || mode === 'none') return;
-    const gl = canvas.getContext('webgl2', { premultipliedAlpha: false, alpha: false, desynchronized: true });
+    // Not desynchronized: a front-buffer canvas flickers against the video overlay on Windows.
+    const gl = canvas.getContext('webgl2', { premultipliedAlpha: false, alpha: false });
     if (!gl) {
       onError('WebGL2 is not available on this device');
       return;

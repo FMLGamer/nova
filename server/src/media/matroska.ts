@@ -418,6 +418,8 @@ async function parseTrack(w: Window, entry: Header): Promise<MkvTrack> {
   if (t.language === 'und') t.language = null;
   t.codec = codecName(t.type, t.codecId);
   if (priv && t.type === 'subtitle') t.codecPrivate = Buffer.from(await data(w, priv, 4 << 20));
+  // The first bytes of an avcC/hvcC record name the profile (10-bit H.264 can't be cast as-is).
+  if (priv && t.type === 'video') t.codecPrivate = Buffer.from(await data(w, priv, 32));
   return t;
 }
 

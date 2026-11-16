@@ -3,7 +3,9 @@ import { fetchJson } from '../lib/upstream.js';
 import { parseMediaId, stripAnimeSeason } from '../media/types.js';
 import type { MediaContext } from '../plugins/protocol.js';
 import { anilistDetail, anilistTitles } from '../services/anilist.js';
+import { aniZip, zipEpisodes } from '../services/anizip.js';
 import { pickTmdbSeason } from '../services/catalog.js';
+import { isImdbId } from '../services/cinemeta.js';
 import { tmdbDetail, tmdbFindTv, tmdbTvSeasons } from '../services/tmdb.js';
 
 const WEEK = 7 * 24 * 60 * 60 * 1000;
@@ -95,27 +97,38 @@ export async function mediaContext(
       season: mediaType === 'tv' ? season ?? 1 : null,
       episode: mediaType === 'tv' ? episode ?? 1 : null,
       absoluteEpisode: episode,
-      ids: { tmdb: providerId, imdb: d.imdbId ?? undefined },
+      ids: isImdbId(providerId) ? { imdb: providerId } : { tmdb: providerId, imdb: d.imdbId ?? undefined },
       tvSeason: season,
       tvEpisode: episode,
       format: mediaType === 'movie' ? 'MOVIE' : 'TV',
     };
   }
 
-  const [d, titles, arm] = await Promise.all([
+  const [d, titles, arm, zip] = await Promise.all([
     anilistDetail(providerId),
     anilistTitles(providerId).catch(() => null),
     armIds(providerId),
+    aniZip(providerId),
   ]);
-  const malId = d.malId ?? arm.myanimelist ?? null;
-  const kitsu = arm.kitsu ? String(arm.kitsu) : malId ? await kitsuFromMal(malId) : null;
+  const zm = zip?.mappings ?? {};
+  const malId = d.malId ?? zm.mal_id ?? arm.myanimelist ?? null;
+  const kitsuKnown = zm.kitsu_id ?? arm.kitsu;
+  const kitsu = kitsuKnown ? String(kitsuKnown) : malId ? await kitsuFromMal(malId) : null;
   const isMovie = (titles?.format ?? '') === 'MOVIE';
   const ep = isMovie ? null : episode ?? 1;
 
-  let tmdbId = arm.themoviedb ? String(arm.themoviedb) : null;
+  const zipTmdb = zm.themoviedb_id != null && String(zm.themoviedb_id) !== '' ? String(zm.themoviedb_id) : null;
+  let tmdbId = zipTmdb ?? (arm.themoviedb ? String(arm.themoviedb) : null);
   if (!tmdbId && !isMovie) tmdbId = await tmdbFindTv(stripAnimeSeason(d.title), d.year).catch(() => null);
   const isSequel = d.relations.some((r) => r.relationType === 'PREQUEL');
-  const tv = tmdbId && ep ? await animeTvCoordinates(tmdbId, d.year, d.totalEpisodes, isSequel, ep) : null;
+  // ani.zip knows each episode's TVDB numbering, which is what IMDb-keyed addons (Cinemeta, Torrentio) use.
+  const zipEp = ep ? zipEpisodes(zip).get(ep) : undefined;
+  const tv =
+    zipEp?.seasonNumber && zipEp.episodeNumber
+      ? { season: zipEp.seasonNumber, episode: zipEp.episodeNumber }
+      : tmdbId && ep
+        ? await animeTvCoordinates(tmdbId, d.year, d.totalEpisodes, isSequel, ep)
+        : null;
 
   const alt = new Set<string>();
   for (const t of [titles?.romaji, titles?.english, stripAnimeSeason(d.title), ...(titles?.synonyms ?? [])]) {
@@ -134,9 +147,9 @@ export async function mediaContext(
       anilist: providerId,
       mal: malId ? String(malId) : undefined,
       kitsu: kitsu ?? undefined,
-      imdb: arm.imdb ?? undefined,
+      imdb: zm.imdb_id ?? arm.imdb ?? undefined,
       tmdb: tmdbId ?? undefined,
-      tvdb: arm.thetvdb ? String(arm.thetvdb) : undefined,
+      tvdb: zm.thetvdb_id ? String(zm.thetvdb_id) : arm.thetvdb ? String(arm.thetvdb) : undefined,
     },
     tvSeason: tv?.season ?? null,
     tvEpisode: tv?.episode ?? null,

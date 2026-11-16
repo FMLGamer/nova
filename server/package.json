@@ -1,7 +1,7 @@
 {
   "name": "nova-server",
   "private": true,
-  "version": "2.1.0",
+  "version": "2.2.0",
   "type": "module",
   "license": "MIT",
   "description": "Nova server: accounts, profiles, plugin host, streaming and metadata.",
@@ -20,6 +20,7 @@
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
+    "multicast-dns": "^7.2.5",
     "webtorrent": "^3.0.21",
     "ws": "^8.23.0",
     "zod": "^3.24.1"
@@ -31,6 +32,7 @@
     "@types/cookie-parser": "^1.4.8",
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
+    "@types/multicast-dns": "^7.2.4",
     "@types/node": "^22.10.5",
     "@types/ws": "^8.18.2",
     "tsx": "^4.19.2",
