@@ -1,0 +1,13 @@
+node_modules
+dist
+server/node_modules
+server/dist
+desktop
+**/*.db
+**/*.db-shm
+**/*.db-wal
+data
+.git
+.github
+*.log
+.DS_Store

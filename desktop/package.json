@@ -1,0 +1,58 @@
+{
+  "name": "nova-desktop",
+  "productName": "Nova",
+  "version": "2.1.0",
+  "description": "Nova for Windows: your media, your plugins, streamed on your own computer.",
+  "license": "MIT",
+  "author": "Nova contributors",
+  "private": true,
+  "main": "main.cjs",
+  "scripts": {
+    "stage": "node scripts/stage.mjs",
+    "start": "electron .",
+    "dist": "node scripts/stage.mjs && electron-builder --win nsis portable --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0",
+    "ffmpeg-static": "5.3.0",
+    "ffprobe-static": "3.1.0"
+  },
+  "build": {
+    "appId": "app.nova.desktop",
+    "productName": "Nova",
+    "copyright": "Nova contributors",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "app",
+        "to": "app"
+      }
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Nova",
+      "artifactName": "Nova-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "Nova-Portable-${version}.${ext}"
+    }
+  }
+}

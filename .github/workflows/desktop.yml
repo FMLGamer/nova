@@ -1,0 +1,44 @@
+name: Windows app
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install
+        run: |
+          npm ci
+          npm --prefix server ci
+          npm --prefix desktop ci
+
+      # Stages the built UI, the compiled server with its dependencies, this
+      # Node runtime and ffmpeg, then packages the installer and portable exe.
+      - name: Build
+        run: npm --prefix desktop run dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nova-windows
+          path: |
+            desktop/release/*.exe
+            desktop/release/*.blockmap
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/release/Nova-Setup-*.exe
+            desktop/release/Nova-Portable-*.exe

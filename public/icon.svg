@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Nova">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa" />
+      <stop offset="0.55" stop-color="#f472b6" />
+      <stop offset="1" stop-color="#fb923c" />
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.42" r="0.6">
+      <stop offset="0" stop-color="#1b1530" />
+      <stop offset="1" stop-color="#07070b" />
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#glow)" />
+  <path d="M256 92c10 74 34 120 72 146 22 15 50 22 92 18-42 4-70 12-92 28-38 26-62 72-72 136-10-64-34-110-72-136-22-16-50-24-92-28 42 4 70-3 92-18 38-26 62-72 72-146z" fill="url(#g)" />
+  <circle cx="256" cy="256" r="26" fill="#07070b" />
+</svg>
