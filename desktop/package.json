@@ -1,7 +1,7 @@
 {
   "name": "nova-desktop",
   "productName": "Nova",
-  "version": "2.3.0",
+  "version": "2.3.1",
   "description": "Nova for Windows: your media, your plugins, streamed on your own computer.",
   "license": "MIT",
   "author": "Nova contributors",
@@ -22,6 +22,9 @@
     "appId": "app.nova.desktop",
     "productName": "Nova",
     "copyright": "Nova contributors",
+    "electronLanguages": [
+      "en-US"
+    ],
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -38,6 +41,7 @@
     ],
     "win": {
       "icon": "build/icon.ico",
+      "artifactName": "Nova-${version}-win.${ext}",
       "target": [
         "nsis",
         "portable",
@@ -54,10 +58,8 @@
     },
     "portable": {
       "artifactName": "Nova-Portable-${version}.${ext}",
-      "splashImage": "build/splash.bmp"
-    },
-    "zip": {
-      "artifactName": "Nova-${version}-win.${ext}"
+      "splashImage": "build/splash.bmp",
+      "useZip": true
     }
   }
 }

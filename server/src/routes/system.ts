@@ -15,7 +15,7 @@ import { signToken, verifyToken, randomToken } from '../lib/crypto.js';
 import { HttpError } from '../lib/http.js';
 import { asyncHandler } from '../lib/async.js';
 
-export const VERSION = '2.3.0';
+export const VERSION = '2.3.1';
 
 export const systemRouter = Router();
 
