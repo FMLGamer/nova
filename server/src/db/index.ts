@@ -509,6 +509,41 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    // Extra folders of books, comics and manga that Nova reads from (and never writes to).
+    version: 9,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE library_sources (
+          id         TEXT PRIMARY KEY,
+          name       TEXT NOT NULL,
+          path       TEXT NOT NULL UNIQUE,
+          kind       TEXT NOT NULL CHECK (kind IN ('book', 'comic', 'manga')),
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+      `);
+    },
+  },
+  {
+    // AniList / MyAnimeList accounts a profile tracks its anime with (tokens sealed).
+    version: 10,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE tracker_accounts (
+          profile_id    TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+          service       TEXT NOT NULL CHECK (service IN ('anilist', 'mal')),
+          token         TEXT NOT NULL,
+          refresh_token TEXT,
+          expires_at    INTEGER,
+          user_id       TEXT,
+          user_name     TEXT,
+          avatar        TEXT,
+          created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (profile_id, service)
+        );
+      `);
+    },
+  },
 ];
 
 function migrate(): void {

@@ -1,4 +1,4 @@
-import type { CatalogItem, MediaType } from './types';
+import type { AppConfig, CatalogItem, MediaType } from './types';
 
 export function fmtClock(s: number): string {
   if (!Number.isFinite(s) || s < 0) s = 0;
@@ -86,6 +86,25 @@ export function watchPath(t: WatchTarget, extra?: Record<string, string>): strin
   const [type, id] = t.mediaId.split(':');
   const q = p.toString();
   return `/watch/${type}/${id}${q ? `?${q}` : ''}`;
+}
+
+/** A new issue on the project's tracker, with the details a bug report needs filled in. */
+export function reportIssueUrl(cfg: Pick<AppConfig, 'projectUrl' | 'version' | 'mode' | 'torrentMode'>): string {
+  const body = [
+    '**What happened?**',
+    '',
+    '',
+    '**What did you expect to happen?**',
+    '',
+    '',
+    '**Steps to reproduce**',
+    '1. ',
+    '',
+    '---',
+    `Nova ${cfg.version} · ${cfg.mode === 'desktop' ? 'Windows app' : `server (torrents: ${cfg.torrentMode})`}`,
+    `Browser: ${navigator.userAgent}`,
+  ].join('\n');
+  return `${cfg.projectUrl}/issues/new?${new URLSearchParams({ body })}`;
 }
 
 export function kindLabel(t: string): string {

@@ -128,18 +128,19 @@ export interface SubtitleStyle {
   weight: number;
 }
 
+export interface TorrentRequirements {
+  qualities: string[];
+  codecs: string[];
+  audioCodecs: string[];
+  formats: string[];
+  allowHdr: boolean;
+  minSeeders: number;
+  maxSizeGb: number;
+  preferredLanguages: string[];
+}
+
 export interface Preferences {
-  torrent: {
-    preferredQualities: string[];
-    maxQuality: string;
-    preferredCodecs: string[];
-    preferredAudio: string[];
-    preferredSources: string[];
-    minSeeders: number;
-    maxSizeGb: number;
-    preferredLanguages: string[];
-    preferRemux: boolean;
-    hdr: boolean;
+  torrent: TorrentRequirements & {
     indexerIds: number[];
     preferredIndexer: string;
   };
@@ -341,6 +342,8 @@ export interface Release {
   kind: SourceKind;
   score: number;
   tier: 0 | 1;
+  /** Requirements a tier-1 release misses ("4K", "HDR", "too large", ...). */
+  misses?: string[];
 }
 
 export interface PluginRun {
@@ -397,6 +400,7 @@ export interface AppConfig {
   torrentMode: 'server' | 'client';
   enginePort: number;
   desktopDownloadUrl: string;
+  projectUrl: string;
 }
 
 export interface EnginePairing {
@@ -477,7 +481,7 @@ export interface MatchCandidate {
 export interface LibraryItem {
   id: string;
   mediaId: string | null;
-  kind: 'movie' | 'tv' | 'anime' | 'book' | 'comic' | 'music';
+  kind: 'movie' | 'tv' | 'anime' | 'book' | 'comic' | 'manga' | 'music';
   title: string;
   year: number | null;
   poster: string | null;
@@ -503,6 +507,54 @@ export interface LibraryFile {
   episode: number | null;
   kind: string;
   mime: string | null;
+}
+
+/** A folder of books, comics or manga the server reads in place. */
+export interface LibrarySource {
+  id: string;
+  name: string;
+  path: string;
+  kind: 'book' | 'comic' | 'manga';
+  fileCount: number;
+  available: boolean;
+}
+
+// ---------------------------------------------------------------- anime tracking
+
+export type TrackStatus = 'watching' | 'completed' | 'planning' | 'paused' | 'dropped';
+
+interface TrackerAccount {
+  connected: boolean;
+  user: string | null;
+  avatar: string | null;
+  expiresAt: number | null;
+}
+
+export interface TrackerStatus {
+  anilist: TrackerAccount & { clientId: string | null };
+  mal: TrackerAccount & { configured: boolean };
+  anilistAuthorizeUrl: string | null;
+  malRedirectUri: string;
+}
+
+export interface TrackEntry {
+  status: TrackStatus | null;
+  progress: number;
+  score: number | null;
+  url: string;
+}
+
+export interface TrackEntries {
+  anilist?: TrackEntry | null;
+  mal?: TrackEntry | null;
+  episodes: number | null;
+}
+
+export interface Discussion {
+  site: 'AniList' | 'MyAnimeList';
+  title: string;
+  url: string;
+  comments: number | null;
 }
 
 export interface MediaFile extends LibraryFile {
@@ -559,18 +611,7 @@ export interface QualityProfile {
   id: string;
   name: string;
   isDefault: boolean;
-  torrent: {
-    preferredQualities: string[];
-    maxQuality: string;
-    preferredCodecs: string[];
-    preferredAudio: string[];
-    preferredSources: string[];
-    minSeeders: number;
-    maxSizeGb: number;
-    preferredLanguages: string[];
-    preferRemux: boolean;
-    hdr: boolean;
-  };
+  torrent: TorrentRequirements;
   anime: { audioLanguages: string[]; preferEmbeddedSubs: boolean };
 }
 

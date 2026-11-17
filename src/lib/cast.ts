@@ -12,6 +12,8 @@ export interface CastDeviceInfo {
   name: string;
   kind: 'chromecast' | 'dlna';
   model: string | null;
+  /** Added by address in the app (removable). */
+  saved?: boolean;
 }
 
 export type CastSubtitle = { kind: 'embedded'; track: number } | { kind: 'text'; vtt: string; language?: string | null; label?: string | null } | null;
@@ -50,6 +52,8 @@ export interface CastStatus {
 
 export const castApi = (base = '') => ({
   devices: (refresh = false) => req<{ devices: CastDeviceInfo[] }>('GET', `${base}/api/cast/devices`, undefined, refresh ? { refresh: 1 } : undefined).then((r) => r.devices),
+  addDevice: (address: string) => req<{ device: CastDeviceInfo }>('POST', `${base}/api/cast/devices`, { address }).then((r) => r.device),
+  removeDevice: (id: string) => req<void>('DELETE', `${base}/api/cast/devices/${encodeURIComponent(id)}`),
   start: (body: CastStartBody) => req<CastStarted>('POST', `${base}/api/cast/start`, body),
   status: (id: string) => req<CastStatus>('GET', `${base}/api/cast/${id}`),
   control: (id: string, action: 'play' | 'pause' | 'seek' | 'volume', value?: number) => req<{ ok: boolean }>('POST', `${base}/api/cast/${id}/control`, { action, value }),

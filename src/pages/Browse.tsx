@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import { api } from '../lib/api';
+import { HERO_HEIGHT, Hero, pickHero } from '../components/Hero';
 import { PosterGrid } from '../components/media';
 import { Chip, Segmented } from '../components/ui';
 
@@ -24,6 +26,7 @@ export function PageHeader({
   subtitle,
   kicker,
   tone,
+  flush,
   children,
 }: {
   title: string;
@@ -31,12 +34,14 @@ export function PageHeader({
   kicker?: string;
   /** Per-tab signature colour for the kicker rule. */
   tone?: string;
+  /** Sits under a hero instead of the top bar. */
+  flush?: boolean;
   children?: React.ReactNode;
 }) {
   return (
-    <div className="px-5 pt-24 pb-6 sm:px-10 sm:pt-28">
+    <div className={flush ? 'relative z-10 px-5 pt-2 pb-6 sm:px-10' : 'px-5 pt-24 pb-6 sm:px-10 sm:pt-28'}>
       {kicker && <Kicker tone={tone}>{kicker}</Kicker>}
-      <h1 className="font-display text-4xl font-bold tracking-tight sm:text-6xl">{title}</h1>
+      <h1 className={flush ? 'font-display text-3xl font-bold tracking-tight sm:text-4xl' : 'font-display text-4xl font-bold tracking-tight sm:text-6xl'}>{title}</h1>
       {subtitle && <p className="mt-2 max-w-xl text-muted">{subtitle}</p>}
       {children && <div className="mt-6">{children}</div>}
     </div>
@@ -64,10 +69,18 @@ export function Browse({ kind }: { kind: 'movies' | 'shows' }) {
     staleTime: 10 * 60_000,
   });
   const items = q.data?.pages.flat() ?? [];
+  const firstPage = q.data?.pages[0];
+  const featured = useMemo(() => pickHero(firstPage), [firstPage]);
 
   return (
     <div>
+      {featured ? (
+        <Hero item={featured} compact eyebrow={kind === 'movies' ? 'Featured film' : 'Featured series'} />
+      ) : (
+        q.isLoading && <div className={`${HERO_HEIGHT.compact} skeleton`} />
+      )}
       <PageHeader
+        flush={Boolean(featured) || q.isLoading}
         title={kind === 'movies' ? 'Movies' : 'Shows'}
         kicker={kind === 'movies' ? 'Feature films' : 'Series & seasons'}
         tone={kind === 'movies' ? '#f5b544' : '#4fb3ff'}

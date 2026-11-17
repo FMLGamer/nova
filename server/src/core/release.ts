@@ -36,8 +36,10 @@ export interface Release {
   cached: boolean;
   kind: 'video' | 'audio' | 'book' | 'comic';
   score: number;
-  /** 0 = preferred source, 1 = everything else (shown collapsed). */
+  /** 0 = fits the viewer's requirements, 1 = everything else (shown collapsed). */
   tier: number;
+  /** Which requirements a tier-1 release misses ("4K", "HDR", ...). */
+  misses: string[];
 }
 
 export function parseQuality(t: string): string | null {
@@ -322,6 +324,7 @@ export function normalizeStream(
     kind: s.nova?.kind ?? mediaKind,
     score: 0,
     tier: 0,
+    misses: [],
   };
 }
 

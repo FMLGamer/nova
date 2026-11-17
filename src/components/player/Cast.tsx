@@ -1,9 +1,9 @@
 import { motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
-import { Cast, Loader2, Pause, Play, RefreshCw, Square, Tv, Volume2 } from 'lucide-react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { Cast, Loader2, Pause, Play, Plus, RefreshCw, Square, Tv, Volume2, X } from 'lucide-react';
 import { castApi, loadCastSdk, type BrowserCast, type CastDeviceInfo } from '../../lib/cast';
 import { cls, fmtClock } from '../../lib/format';
-import { useAppConfig } from '../../lib/queries';
+import { useAppConfig, useSession } from '../../lib/queries';
 import { errorText } from '../../lib/store';
 import { Slider, Spinner } from '../ui';
 
@@ -15,7 +15,13 @@ export function CastDevices({ base, allowBrowser, busy, onPick }: { base: string
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sdk, setSdk] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [address, setAddress] = useState('');
+  const [addBusy, setAddBusy] = useState(false);
   const desktop = useAppConfig().data?.mode === 'desktop' || Boolean(base);
+  const { data: session } = useSession();
+  // Added TVs are shared by everyone on the server; on the Nova app the viewer owns it.
+  const canAdd = Boolean(base) || Boolean(session?.account.isAdmin);
 
   const scan = async (refresh: boolean) => {
     setScanning(true);
@@ -35,22 +41,52 @@ export function CastDevices({ base, allowBrowser, busy, onPick }: { base: string
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base, allowBrowser]);
 
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    setAddBusy(true);
+    setError(null);
+    try {
+      const d = await castApi(base).addDevice(address.trim());
+      setDevices((list) => [...(list ?? []).filter((x) => x.id !== d.id), d]);
+      setAddress('');
+      setAdding(false);
+    } catch (err) {
+      setError(errorText(err));
+    } finally {
+      setAddBusy(false);
+    }
+  };
+  const remove = async (d: CastDeviceInfo) => {
+    try {
+      await castApi(base).removeDevice(d.id);
+      setDevices((list) => list?.filter((x) => x.id !== d.id) ?? null);
+    } catch (err) {
+      setError(errorText(err));
+    }
+  };
+
   return (
     <div className="space-y-1">
       {devices?.map((d) => (
-        <button
-          key={d.id}
-          disabled={Boolean(busy)}
-          onClick={() => onPick({ kind: 'device', device: d })}
-          className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/6 disabled:opacity-50"
-        >
-          <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white/8">{d.kind === 'chromecast' ? <Cast className="size-4" /> : <Tv className="size-4" />}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate font-medium">{d.name}</span>
-            <span className="block truncate text-xs text-faint">{[d.kind === 'chromecast' ? 'Chromecast' : 'DLNA TV', d.model].filter(Boolean).join(' · ')}</span>
-          </span>
-          {busy === d.id && <Spinner className="size-4" />}
-        </button>
+        <div key={d.id} className="group flex items-center rounded-xl transition-colors hover:bg-white/6">
+          <button
+            disabled={Boolean(busy)}
+            onClick={() => onPick({ kind: 'device', device: d })}
+            className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5 text-left text-sm disabled:opacity-50"
+          >
+            <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white/8">{d.kind === 'chromecast' ? <Cast className="size-4" /> : <Tv className="size-4" />}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{d.name}</span>
+              <span className="block truncate text-xs text-faint">{[d.kind === 'chromecast' ? 'Chromecast' : 'DLNA TV', d.model, d.saved && 'added by address'].filter(Boolean).join(' · ')}</span>
+            </span>
+            {busy === d.id && <Spinner className="size-4" />}
+          </button>
+          {d.saved && canAdd && (
+            <button onClick={() => void remove(d)} aria-label={`Forget ${d.name}`} className="mr-2 grid size-8 place-items-center rounded-full text-faint opacity-0 group-hover:opacity-100 hover:bg-white/10 hover:text-fg focus:opacity-100 max-sm:opacity-100">
+              <X className="size-4" />
+            </button>
+          )}
+        </div>
       ))}
       {sdk && (
         <button
@@ -72,13 +108,48 @@ export function CastDevices({ base, allowBrowser, busy, onPick }: { base: string
         <p className="px-3 py-2 text-sm text-muted">
           No TVs found on this network. Make sure the TV is on and on the same network{desktop ? ' as this computer' : ' as the Nova server'}.
           {desktop && ' If Windows asked whether Nova may use the network, allow it on private networks.'}
-          {!desktop && ' A server in a container only sees your TV with host networking (or list it in CAST_DEVICES); Chrome and Edge can also cast with their own Cast menu.'}
+          {!desktop && ' A server in a container only sees TVs with host networking; Chrome and Edge can also cast with their own Cast menu.'}
         </p>
       )}
       {error && <p className="px-3 py-1 text-xs text-bad">{error}</p>}
-      <button onClick={() => void scan(true)} disabled={scanning} className="mt-1 flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted hover:text-fg disabled:opacity-60">
-        {scanning ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} {scanning ? 'Looking for TVs…' : 'Search again'}
-      </button>
+      <div className="flex flex-wrap items-center gap-1">
+        <button onClick={() => void scan(true)} disabled={scanning} className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted hover:text-fg disabled:opacity-60">
+          {scanning ? <Loader2 className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} {scanning ? 'Looking for TVs…' : 'Search again'}
+        </button>
+        {canAdd && !adding && (
+          <button onClick={() => setAdding(true)} className="flex items-center gap-2 rounded-lg px-3 py-2 text-xs text-muted hover:text-fg">
+            <Plus className="size-3.5" /> Add a TV by IP address
+          </button>
+        )}
+      </div>
+      {adding && (
+        <form onSubmit={add} className="mx-1 space-y-2 rounded-2xl border border-line p-3">
+          <label className="block text-xs font-medium text-muted" htmlFor="cast-address">
+            TV or Chromecast address
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="cast-address"
+              autoFocus
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="192.168.1.40"
+              className="h-9 min-w-0 flex-1 rounded-lg border border-line bg-white/5 px-3 text-sm focus:border-accent focus:outline-none"
+            />
+            <button type="submit" disabled={addBusy || address.trim().length < 2} className="h-9 rounded-lg bg-white px-3 text-sm font-semibold text-black disabled:opacity-50">
+              {addBusy ? <Loader2 className="size-4 animate-spin" /> : 'Add'}
+            </button>
+          </div>
+          <p className="text-xs leading-relaxed text-faint">
+            Find the IP address in the TV's network settings (or the Google Home app for a Chromecast). Nova checks what answers there: a Chromecast or a DLNA
+            TV. You can also paste a DLNA description URL.
+          </p>
+          <button type="button" onClick={() => setAdding(false)} className="text-xs text-muted hover:text-fg">
+            Cancel
+          </button>
+        </form>
+      )}
+      {!canAdd && <p className="px-3 text-xs text-faint">TV missing? A server admin can add it here by its IP address.</p>}
       <p className="px-3 pt-2 text-xs leading-relaxed text-faint">
         Text subtitles are sent to the TV as subtitles. Styled (ASS) subtitles are drawn into the picture while casting, which needs a little more of this machine's power.
       </p>

@@ -11,7 +11,7 @@ import { offlineUrl } from '../lib/offline';
 import { useDetail, useEpisodes, usePrefs, useSession } from '../lib/queries';
 import { errorText, toast } from '../lib/store';
 import type { MediaFile, PlaySource, Release, RoomTarget, SourceSearch } from '../lib/types';
-import { Player, type Playable } from '../components/player/Player';
+import { Player, videoCodecPlayable, type Playable } from '../components/player/Player';
 import { SourcePicker } from '../components/player/SourcePicker';
 import { Spinner } from '../components/ui';
 
@@ -106,7 +106,9 @@ export default function Watch() {
 
   const roomQ = useQuery({ queryKey: ['room', roomCode], queryFn: () => api.rooms.get(roomCode!), enabled: Boolean(roomCode), retry: false });
 
-  const sourcesUrl = roomCode ? null : api.play.sourcesUrl({ mediaId, season: season ?? undefined, episode: episode ?? undefined });
+  // HEVC only fits when this browser can decode it (or the server converts video for this account).
+  const unplayable = !session?.settings.transcodingEnabled && !videoCodecPlayable('hevc') ? 'h265' : undefined;
+  const sourcesUrl = roomCode ? null : api.play.sourcesUrl({ mediaId, season: season ?? undefined, episode: episode ?? undefined, unplayable });
   const search = useSourceSearch(phase === 'init' || playable?.blobUrl ? null : sourcesUrl);
 
   // Reset when the episode changes.

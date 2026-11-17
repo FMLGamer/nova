@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { asyncHandler } from '../lib/async.js';
 import { HttpError, parse } from '../lib/http.js';
 import {
+  addSource,
   applyMatch,
   deleteItem,
   filesForMedia,
@@ -13,12 +14,15 @@ import {
   lastScan,
   libraryEnabled,
   listItems,
+  listSources,
   refreshMetadata,
+  removeSource,
   scanLibrary,
   setOverrides,
   setPrivate,
   storageStats,
 } from '../library/library.js';
+import { itemCover } from '../library/covers.js';
 import {
   approveDownload,
   cancelDownload,
@@ -61,6 +65,39 @@ serverLibraryRouter.get('/items', (req, res) => {
 
 serverLibraryRouter.get('/items/:id', (req, res) => {
   res.json({ item: getItem(req.params.id, req.account!.id) });
+});
+
+serverLibraryRouter.get(
+  '/items/:id/cover',
+  asyncHandler(async (req, res) => {
+    const item = getItem(req.params.id, req.account!.id);
+    const cover = await itemCover(item.id, item.folder);
+    if (!cover) throw new HttpError(404, 'No cover');
+    res.setHeader('Content-Type', cover.type);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(cover.data);
+  }),
+);
+
+// ---- reading folders: books, comics and manga Nova reads in place
+serverLibraryRouter.get('/sources', requireAdmin, (_req, res) => {
+  res.json({ sources: listSources() });
+});
+
+serverLibraryRouter.post(
+  '/sources',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const body = parse(z.object({ path: z.string().min(1).max(1000), kind: z.enum(['book', 'comic', 'manga']), name: z.string().max(120).optional() }), req.body);
+    const source = addSource(body);
+    const result = await scanLibrary();
+    res.status(201).json({ source: listSources().find((s) => s.id === source.id) ?? source, result });
+  }),
+);
+
+serverLibraryRouter.delete('/sources/:id', requireAdmin, (req, res) => {
+  removeSource(req.params.id);
+  res.status(204).end();
 });
 
 /** Files on the server for one catalogue title (title page: "On this server"). */

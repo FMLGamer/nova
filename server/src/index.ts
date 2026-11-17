@@ -30,7 +30,7 @@ import { every } from './lib/scheduler.js';
 import { bootPlugins, checkAllUpdates } from './plugins/manager.js';
 import { startPluginJobs } from './plugins/jobs.js';
 import { pumpDownloads, recoverDownloads } from './library/downloads.js';
-import { libraryEnabled, scanLibrary } from './library/library.js';
+import { scanLibrary } from './library/library.js';
 import { runAllRules } from './library/rules.js';
 import { refreshAllEpg, refreshAllLive } from './services/live.js';
 import { scheduleBackups } from './services/backups.js';
@@ -38,6 +38,7 @@ import { seedLocalProvider } from './services/assistant/providers.js';
 import { handleRoomUpgrade } from './services/rooms.js';
 import { VERSION, engineGateway, engineRouter, pairingsRouter, systemRouter } from './routes/system.js';
 import { castMediaRouter, castRouter } from './cast/routes.js';
+import { trackersRouter } from './routes/trackers.js';
 
 // A torrent-library hiccup must never take down the whole server for all users.
 process.on('uncaughtException', (err) => console.error('[nova] uncaughtException:', err));
@@ -133,6 +134,7 @@ app.use('/api/share', guestRouter);
 app.use('/api/assistant', assistantRouter);
 app.use('/api/subtitles', subtitleToolsRouter);
 app.use('/api/cast', castRouter);
+app.use('/api/trackers', trackersRouter);
 
 // Large binary responses live outside /api.
 app.use('/stream', streamRouter);
@@ -199,7 +201,7 @@ if (config.torrentMode === 'server') {
   every('downloads', 10_000, pumpDownloads, { initialDelayMs: 5_000 });
   every('auto-download-rules', 30 * 60_000, runAllRules, { initialDelayMs: 2 * 60_000 });
 }
-if (libraryEnabled()) every('library-scan', config.library.scanIntervalMinutes * 60_000, scanLibrary, { initialDelayMs: 60_000 });
+every('library-scan', config.library.scanIntervalMinutes * 60_000, scanLibrary, { initialDelayMs: 60_000 });
 every('live-refresh', 6 * 3600_000, refreshAllLive, { initialDelayMs: 3 * 60_000 });
 every('epg-refresh', 12 * 3600_000, refreshAllEpg, { initialDelayMs: 4 * 60_000 });
 scheduleBackups();

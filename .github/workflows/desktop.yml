@@ -24,7 +24,7 @@ jobs:
           npm --prefix desktop ci
 
       # Stages the built UI, the compiled server with its dependencies, this
-      # Node runtime and ffmpeg, then packages the installer and portable exe.
+      # Node runtime and ffmpeg, then packages the installer, portable exe and zip.
       - name: Build
         run: npm --prefix desktop run dist
 
@@ -33,6 +33,7 @@ jobs:
           name: nova-windows
           path: |
             desktop/release/*.exe
+            desktop/release/*.zip
             desktop/release/*.blockmap
 
       - name: Attach to release
@@ -42,3 +43,4 @@ jobs:
           files: |
             desktop/release/Nova-Setup-*.exe
             desktop/release/Nova-Portable-*.exe
+            desktop/release/Nova-*-win.zip

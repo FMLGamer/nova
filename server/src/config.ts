@@ -37,6 +37,8 @@ export const COOKIE_NAME = 'stream_session';
  * desktop - the Windows app: one local owner, no sign-in screen, bound to loopback.
  */
 const MODE = env('NOVA_MODE', 'server') === 'desktop' ? 'desktop' : 'server';
+// Where the source, releases and issue tracker live (a fork can point this at its own repository).
+const PROJECT_URL = env('PROJECT_URL', 'https://github.com/FMLGamer/nova').replace(/\/+$/, '');
 
 export const config = {
   nodeEnv: NODE_ENV,
@@ -65,8 +67,9 @@ export const config = {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
+  projectUrl: PROJECT_URL,
   // Where client-mode users are sent to get the desktop app.
-  desktopDownloadUrl: env('DESKTOP_DOWNLOAD_URL', 'https://github.com/FMLGamer/nova/releases/latest'),
+  desktopDownloadUrl: env('DESKTOP_DOWNLOAD_URL', `${PROJECT_URL}/releases/latest`),
   webDir: env('WEB_DIR', path.resolve(process.cwd(), '..', 'dist')),
   // Leave empty to use the address each request came in on.
   publicUrl: env('PUBLIC_URL', ''),
@@ -108,6 +111,12 @@ export const config = {
     apiKey: env('OPENSUBTITLES_API_KEY', ''),
     username: env('OPENSUBTITLES_USERNAME', ''),
     password: env('OPENSUBTITLES_PASSWORD', ''),
+  },
+  // Anime tracking: each server registers its own (free) API client with AniList / MyAnimeList.
+  trackers: {
+    anilistClientId: env('ANILIST_CLIENT_ID', ''),
+    malClientId: env('MAL_CLIENT_ID', ''),
+    malClientSecret: env('MAL_CLIENT_SECRET', ''),
   },
   // --- Plugins (sources, metadata, live TV, ...) ---
   plugins: {

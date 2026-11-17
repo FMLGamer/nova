@@ -36,7 +36,7 @@ import {
 import { api } from '../../lib/api';
 import { cls, episodeLabel, fmtBytes, fmtClock, fmtSpeed, langName, matchesLanguage } from '../../lib/format';
 import { useOffline } from '../../lib/offline';
-import { useContributions, usePrefs, useSavePrefs, useSession } from '../../lib/queries';
+import { useContributions, useEpisodes, usePrefs, useSavePrefs, useSession } from '../../lib/queries';
 import { errorText, toast } from '../../lib/store';
 import type { CatalogDetail, Episode, MediaTracks, RoomState, RoomTarget, SubtitleOption } from '../../lib/types';
 import { Segmented, Slider, Spinner, Switch } from '../ui';
@@ -92,7 +92,7 @@ const BROWSER_AUDIO = new Set(['aac', 'mp3', 'opus', 'vorbis', 'flac', 'mp2']);
 const TEXT_SUBS = new Set(['subrip', 'srt', 'ass', 'ssa', 'webvtt', 'mov_text', 'text', 'stl']);
 const SLEEP = [0, 15, 30, 45, 60, 90, -1];
 
-function videoCodecPlayable(codec: string): boolean {
+export function videoCodecPlayable(codec: string): boolean {
   const c = codec.toLowerCase();
   if (c === 'h264' || c === 'vp9' || c === 'vp8' || c === 'av1') return true;
   if (c === 'hevc' || c === 'h265') {
@@ -176,6 +176,16 @@ export function Player(p: PlayerProps) {
   const [fullscreen, setFullscreen] = useState(false);
   const [chrome, setChrome] = useState(true);
   const [panel, setPanel] = useState<Panel>(null);
+  const seasons = (p.detail?.seasons ?? []).filter((s) => s.episodeCount > 0 || s.season === p.season);
+  const [epSeason, setEpSeason] = useState(p.season ?? 1);
+  const otherSeason = useEpisodes(p.mediaType === 'tv' && epSeason !== (p.season ?? 1) ? p.mediaId : null, epSeason);
+  const panelEpisodes = epSeason === (p.season ?? 1) ? p.episodes : (otherSeason.data ?? []).filter((e) => e.season === epSeason);
+  const episodeScrolled = useRef(false);
+  useEffect(() => {
+    if (panel === 'episodes') return;
+    episodeScrolled.current = false;
+    setEpSeason(p.season ?? 1);
+  }, [panel, p.season]);
   const [flash, setFlash] = useState<{ id: number; icon: ReactNode } | null>(null);
   const [hover, setHover] = useState<{ x: number; t: number } | null>(null);
   const [enhance, setEnhance] = useState<EnhanceMode>((prefs?.ui.enhance as EnhanceMode) ?? 'none');
@@ -1195,7 +1205,7 @@ export function Player(p: PlayerProps) {
                 <SkipForward className="size-5" />
               </button>
             )}
-            {p.episodes.length > 1 && (
+            {(p.episodes.length > 1 || (p.mediaType === 'tv' && seasons.length > 1)) && (
               <button onClick={() => setPanel(panel === 'episodes' ? null : 'episodes')} aria-label="Episodes" className={cls('grid size-10 place-items-center rounded-full hover:bg-white/10', panel === 'episodes' && 'bg-white/15')}>
                 <ListVideo className="size-5" />
               </button>
@@ -1246,24 +1256,52 @@ export function Player(p: PlayerProps) {
           </Panel>
         )}
         {panel === 'episodes' && (
-          <Panel title={p.mediaType === 'anime' ? 'Episodes' : `Season ${p.season ?? 1}`} onClose={() => setPanel(null)}>
+          <Panel title="Episodes" onClose={() => setPanel(null)}>
+            {p.mediaType === 'tv' && seasons.length > 1 && (
+              <div className="scrollbar-none -mx-3 mb-2 flex gap-1.5 overflow-x-auto px-3 pb-1">
+                {seasons.map((s) => (
+                  <button
+                    key={s.season}
+                    onClick={() => setEpSeason(s.season)}
+                    className={cls(
+                      'shrink-0 rounded-full px-3 py-1.5 text-[13px] font-medium whitespace-nowrap transition-colors',
+                      s.season === epSeason ? 'bg-white text-black' : 'bg-white/8 text-muted hover:bg-white/14 hover:text-fg',
+                    )}
+                  >
+                    {s.season === 0 ? 'Specials' : `Season ${s.season}`}
+                  </button>
+                ))}
+              </div>
+            )}
+            {otherSeason.isFetching && !panelEpisodes.length && (
+              <div className="grid h-32 place-items-center">
+                <Spinner className="size-5" />
+              </div>
+            )}
             <div className="space-y-1">
-              {p.episodes.map((e) => (
-                <button
-                  key={e.id}
-                  ref={(el) => {
-                    if (e.episode === p.episode) el?.scrollIntoView({ block: 'center' });
-                  }}
-                  onClick={() => p.onEpisode(e.season, e.episode)}
-                  className={cls('flex w-full gap-3 rounded-2xl p-2 text-left transition-colors', e.episode === p.episode ? 'bg-white/12' : 'hover:bg-white/6')}
-                >
-                  <div className="aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-white/5">{e.still && <img src={e.still} alt="" loading="lazy" className="size-full object-cover" />}</div>
-                  <div className="min-w-0 py-0.5">
-                    <div className="text-xs text-faint">{episodeLabel(p.mediaType, e.season, e.episode)}</div>
-                    <div className="truncate text-sm font-medium">{e.title}</div>
-                  </div>
-                </button>
-              ))}
+              {panelEpisodes.map((e) => {
+                const current = e.episode === p.episode && e.season === (p.season ?? e.season);
+                return (
+                  <button
+                    key={e.id}
+                    ref={(el) => {
+                      // Inline refs re-run on every render (several per second while playing).
+                      if (current && el && !episodeScrolled.current) {
+                        episodeScrolled.current = true;
+                        el.scrollIntoView({ block: 'center' });
+                      }
+                    }}
+                    onClick={() => p.onEpisode(e.season, e.episode)}
+                    className={cls('flex w-full gap-3 rounded-2xl p-2 text-left transition-colors', current ? 'bg-white/12' : 'hover:bg-white/6')}
+                  >
+                    <div className="aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-white/5">{e.still && <img src={e.still} alt="" loading="lazy" className="size-full object-cover" />}</div>
+                    <div className="min-w-0 py-0.5">
+                      <div className="text-xs text-faint">{episodeLabel(p.mediaType, e.season, e.episode)}</div>
+                      <div className="truncate text-sm font-medium">{e.title}</div>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </Panel>
         )}

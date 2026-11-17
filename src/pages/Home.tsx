@@ -1,17 +1,14 @@
-import { motion, useScroll, useTransform } from 'motion/react';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useMemo, type ReactNode } from 'react';
+import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Check, Info, Play, Plus, Radio, Star } from 'lucide-react';
+import { BookOpen, Radio } from 'lucide-react';
 import { api } from '../lib/api';
-import { cls, episodeLabel, fmtAirTime, fmtLeft, greeting, metaLine, titlePath, watchPath } from '../lib/format';
-import { playIntent } from '../lib/intent';
-import { useCollections, useContinue, useContributions, useDetail, useListToggle, useMediaProgress, useMyList, usePrefs, useProfile, useSession, useUpNext } from '../lib/queries';
-import { useApp } from '../lib/store';
+import { episodeLabel, fmtAirTime, fmtLeft, greeting, titlePath, watchPath } from '../lib/format';
+import { useCollections, useContinue, useContributions, useMyList, usePrefs, useProfile, useSession, useUpNext } from '../lib/queries';
 import type { CatalogItem, Row } from '../lib/types';
+import { HERO_HEIGHT, Hero } from '../components/Hero';
 import { PosterCard, Rail, RailSkeleton, WideCard } from '../components/media';
-import { Trailer } from '../components/Trailer';
-import { Button, Empty } from '../components/ui';
+import { Empty } from '../components/ui';
 import { PluginRail } from './PluginMeta';
 
 const FEATURE_ROWS = ['now-playing', 'on-the-air', 'seasonal-anime', 'trending-anime', 'trending-movies', 'trending-tv'];
@@ -29,110 +26,6 @@ function pickFeatured(rows: Row[]): CatalogItem | null {
   }
   return pool.length ? pool[Math.floor(Math.random() * pool.length)]! : (rows.flatMap((r) => r.items).find((i) => i.backdrop) ?? null);
 }
-
-export function Hero({ item, eyebrow }: { item: CatalogItem; eyebrow?: ReactNode }) {
-  const navigate = useNavigate();
-  const { data: prefs } = usePrefs();
-  const { data: detail } = useDetail(item.id);
-  const { data: progress } = useMediaProgress(item.id);
-  const list = useListToggle();
-  const setAmbient = useApp((s) => s.setAmbient);
-  const [trailerOn, setTrailerOn] = useState(false);
-  const [trailerFailed, setTrailerFailed] = useState(false);
-  const intent = detail ? playIntent(detail, progress) : null;
-  const { scrollY } = useScroll();
-  const fadeEnd = typeof window !== 'undefined' ? window.innerHeight * 0.6 : 500;
-  const heroOpacity = useTransform(scrollY, [0, fadeEnd], [1, 0]);
-
-  useEffect(() => setAmbient(item.backdrop), [item.backdrop, setAmbient]);
-  useEffect(() => {
-    if (!detail?.trailer || prefs?.ui.autoplayPreviews === false) return;
-    const t = window.setTimeout(() => setTrailerOn(true), 2200);
-    return () => window.clearTimeout(t);
-  }, [detail?.trailer, prefs?.ui.autoplayPreviews]);
-
-  return (
-    <section className="relative h-[78svh] min-h-[520px] w-full overflow-hidden sm:h-[86svh]">
-      <motion.div style={{ opacity: heroOpacity }} className="absolute inset-0">
-      <motion.img
-        src={item.backdrop ?? undefined}
-        alt=""
-        initial={{ scale: 1.04, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.9, ease: [0.2, 0, 0, 1] }}
-        className="absolute inset-0 size-full object-cover"
-      />
-      {trailerOn && detail?.trailer && !trailerFailed && <Trailer videoKey={detail.trailer.key} onFail={() => setTrailerFailed(true)} />}
-      <div className="absolute inset-0 bg-gradient-to-t from-bg via-bg/30 to-transparent" />
-      <div className="absolute inset-0 bg-gradient-to-r from-bg/90 via-bg/35 to-transparent" />
-      <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-bg to-transparent" />
-
-      <div className="absolute inset-x-0 bottom-[12%] px-5 sm:px-10">
-        <motion.div
-          initial="hidden"
-          animate="show"
-          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04, delayChildren: 0.05 } } }}
-          className="max-w-2xl"
-        >
-          {eyebrow && (
-            <motion.div variants={rise} className="mb-3 text-xs font-semibold tracking-[0.2em] text-white/70 uppercase">
-              {eyebrow}
-            </motion.div>
-          )}
-          <motion.h1
-            variants={rise}
-            className={cls(
-              'font-display leading-[0.95] font-bold text-balance drop-shadow-[0_4px_30px_rgb(0_0_0/0.5)]',
-              item.title.length > 28 ? 'text-[clamp(2.1rem,4.4vw,3.8rem)]' : 'text-[clamp(2.4rem,6vw,5.2rem)]',
-            )}
-          >
-            {item.title}
-          </motion.h1>
-          <motion.div variants={rise} className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-white/80">
-            {item.rating != null && item.rating > 0 && (
-              <span className="flex items-center gap-1 font-semibold text-white">
-                <Star className="size-3.5 fill-amber-300 text-amber-300" /> {item.rating.toFixed(1)}
-              </span>
-            )}
-            <span>{metaLine({ ...item, runtime: detail?.runtime ?? item.runtime })}</span>
-            {item.genres.slice(0, 3).map((g) => (
-              <span key={g} className="rounded-full border border-white/20 px-2.5 py-0.5 text-xs">
-                {g}
-              </span>
-            ))}
-          </motion.div>
-          <motion.p variants={rise} className="mt-4 line-clamp-3 max-w-xl text-[15px] leading-relaxed text-white/75 sm:text-base">
-            {item.overview}
-          </motion.p>
-          <motion.div variants={rise} className="mt-7 flex flex-wrap items-center gap-3">
-            <Button
-              size="lg"
-              variant="white"
-              icon={<Play className="size-5 fill-current" />}
-              onClick={() => navigate(watchPath({ mediaId: item.id, season: intent?.season, episode: intent?.episode }))}
-            >
-              {intent?.label ?? 'Play'}
-              {intent?.sub && <span className="font-normal text-black/60">· {intent.sub}</span>}
-            </Button>
-            <Button size="lg" variant="glass" icon={<Info className="size-5" />} onClick={() => navigate(titlePath(item.id))}>
-              Details
-            </Button>
-            <button
-              onClick={() => list.toggle(item)}
-              aria-label={list.has(item.id) ? 'Remove from My List' : 'Add to My List'}
-              className="glass grid size-12 place-items-center rounded-full transition hover:bg-white/15 active:scale-90"
-            >
-              {list.has(item.id) ? <Check className="size-5" /> : <Plus className="size-5" />}
-            </button>
-          </motion.div>
-        </motion.div>
-      </div>
-      </motion.div>
-    </section>
-  );
-}
-
-const rise = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: [0.2, 0, 0, 1] as const } } };
 
 function ContinueRail() {
   const qc = useQueryClient();
@@ -355,7 +248,7 @@ export function Home() {
         featured ? (
           <Hero item={featured} eyebrow={`${greeting()}, ${profile?.name ?? ''}`} />
         ) : (
-          <div className="h-[78svh] min-h-[520px] skeleton" />
+          <div className={`${HERO_HEIGHT.full} skeleton`} />
         )
       ) : (
         <div className="h-24" />

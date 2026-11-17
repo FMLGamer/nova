@@ -81,17 +81,92 @@ export function libraryRoot(): string {
   return path.resolve(config.library.dir);
 }
 
+// ---------------------------------------------------------------- reading folders (library sources)
+
+export type SourceKind = 'book' | 'comic' | 'manga';
+
+export interface LibrarySource {
+  id: string;
+  name: string;
+  path: string;
+  kind: SourceKind;
+  fileCount: number;
+  available: boolean;
+}
+
+/** Files from a source are stored as "@<source id>/<path inside it>"; the library volume's have no prefix. */
+const SOURCE_PREFIX = /^@([^/]+)\/(.+)$/;
+
+export function listSources(): LibrarySource[] {
+  const rows = db.prepare('SELECT id, name, path, kind FROM library_sources ORDER BY name').all() as Omit<LibrarySource, 'fileCount' | 'available'>[];
+  return rows.map((r) => ({
+    ...r,
+    fileCount: (db.prepare('SELECT COUNT(*) AS n FROM library_files WHERE path LIKE ?').get(`@${r.id}/%`) as { n: number }).n,
+    available: isDir(r.path),
+  }));
+}
+
+function isDir(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+export function addSource(input: { name?: string; path: string; kind: SourceKind }): LibrarySource {
+  const dir = path.resolve(input.path.trim());
+  if (!isDir(dir)) throw new HttpError(400, `Nova can't open that folder: ${dir}`);
+  const overlaps = db.prepare('SELECT path FROM library_sources').all() as { path: string }[];
+  const inside = (a: string, b: string) => a === b || a.startsWith(b + path.sep);
+  if (overlaps.some((s) => inside(dir, s.path) || inside(s.path, dir))) throw new HttpError(409, 'That folder is already part of another reading folder');
+  if (config.library.dir && (inside(dir, libraryRoot()) || inside(libraryRoot(), dir))) {
+    throw new HttpError(409, 'That folder overlaps the server library, which is scanned already');
+  }
+  const id = newId();
+  db.prepare('INSERT INTO library_sources (id, name, path, kind) VALUES (?, ?, ?, ?)').run(id, input.name?.trim() || path.basename(dir) || dir, dir, input.kind);
+  return listSources().find((s) => s.id === id)!;
+}
+
+/** Forgets a folder and everything Nova read from it; the files themselves are never touched. */
+export function removeSource(id: string): void {
+  db.prepare('DELETE FROM library_files WHERE path LIKE ?').run(`@${id}/%`);
+  db.prepare('DELETE FROM library_items WHERE id NOT IN (SELECT DISTINCT item_id FROM library_files)').run();
+  db.prepare('DELETE FROM library_sources WHERE id = ?').run(id);
+}
+
+/** Absolute path of a stored library file, or null when it points outside its folder. */
+export function libraryFilePath(rel: string): string | null {
+  const m = SOURCE_PREFIX.exec(rel);
+  let root: string;
+  let inner: string;
+  if (m) {
+    const src = db.prepare('SELECT path FROM library_sources WHERE id = ?').get(m[1]) as { path: string } | undefined;
+    if (!src) return null;
+    root = path.resolve(src.path);
+    inner = m[2]!;
+  } else {
+    if (!config.library.dir) return null;
+    root = libraryRoot();
+    inner = rel;
+  }
+  const abs = path.resolve(root, inner);
+  return abs.startsWith(root + path.sep) ? abs : null;
+}
+
 /** Hand edits always win over provider metadata. */
 function toDTO(r: ItemRow, accountId: string | null): LibraryItemDTO {
   const overrides = JSON.parse(r.overrides || '{}') as Record<string, unknown>;
   const pick = <T>(key: string, value: T): T => (key in overrides ? (overrides[key] as T) : value);
+  // Books and comics found in folders often have no catalogue art: use the one inside the files.
+  const poster = r.poster ?? (r.kind === 'comic' || r.kind === 'manga' || r.kind === 'book' ? `/api/server-library/items/${r.id}/cover` : null);
   return {
     id: r.id,
     mediaId: r.media_id,
     kind: r.kind,
     title: pick('title', r.title),
     year: pick('year', r.year),
-    poster: pick('poster', r.poster),
+    poster: pick('poster', poster),
     backdrop: pick('backdrop', r.backdrop),
     overview: pick('overview', r.overview),
     matchStatus: r.match_status,
@@ -348,6 +423,8 @@ export function deleteItem(itemId: string, deleteFiles: boolean): void {
   if (deleteFiles && libraryEnabled()) {
     const root = libraryRoot();
     for (const f of filesOf(itemId)) {
+      // Reading folders are only ever read from.
+      if (SOURCE_PREFIX.test(f.path)) continue;
       const abs = path.resolve(root, f.path);
       if (abs.startsWith(root)) fs.rmSync(abs, { force: true });
     }
@@ -385,76 +462,105 @@ function* walk(dir: string, root: string, depth = 0): Generator<{ rel: string; s
 let scanning = false;
 export let lastScan: { at: string; added: number; review: number; removed: number } | null = null;
 
-/** Picks up files dropped into the library volume and matches them to metadata. */
+interface ScanRoot {
+  /** Prepended to every stored path ("" for the library volume, "@<id>/" for a reading folder). */
+  prefix: string;
+  dir: string;
+  /** Reading folders only hold one kind of thing; the library volume works it out per file. */
+  kind: SourceKind | null;
+}
+
+function scanRoots(): ScanRoot[] {
+  const roots: ScanRoot[] = libraryEnabled() ? [{ prefix: '', dir: libraryRoot(), kind: null }] : [];
+  for (const s of listSources()) roots.push({ prefix: `@${s.id}/`, dir: s.path, kind: s.kind });
+  return roots;
+}
+
+const UNMATCHED_KINDS = new Set<LibraryKind>(['comic', 'manga', 'music']);
+
+/** Picks up files dropped into the library volume and the reading folders, and matches them to metadata. */
 export async function scanLibrary(): Promise<{ added: number; review: number; removed: number }> {
-  if (!libraryEnabled() || scanning) return { added: 0, review: 0, removed: 0 };
+  if (scanning) return { added: 0, review: 0, removed: 0 };
   scanning = true;
   try {
-    const root = libraryRoot();
     const known = new Set((db.prepare('SELECT path FROM library_files').all() as { path: string }[]).map((r) => r.path));
     const seen = new Set<string>();
+    // A folder that is offline (unplugged drive, network share) keeps what Nova knew about it.
+    const offline: string[] = [];
     let added = 0;
     let review = 0;
-    for (const f of walk(root, root)) {
-      seen.add(f.rel);
-      if (known.has(f.rel)) continue;
-      const parts = f.rel.split('/');
-      const fk = fileKind(f.rel);
-      const parsedFile = parseName(f.rel);
-      let kind = kindFromPath(f.rel);
-      if (!kind) {
-        if (fk === 'book') kind = 'book';
-        else if (fk === 'comic') kind = 'comic';
-        else if (fk === 'audio') kind = 'music';
-        else if (parsedFile.animeStyle) kind = 'anime';
-        else kind = parsedFile.season != null || parsedFile.episode != null ? 'tv' : 'movie';
+    for (const root of scanRoots()) {
+      if (!isDir(root.dir)) {
+        offline.push(root.prefix);
+        continue;
       }
-      const grouped = (kind === 'tv' || kind === 'anime' || kind === 'movie') && parts.length > 2;
-      const folder = grouped ? parts.slice(0, 2).join('/') : f.rel;
-      const existing = db.prepare('SELECT id FROM library_items WHERE folder = ?').get(folder) as { id: string } | undefined;
-      let itemId = existing?.id;
-      if (!itemId) {
-        const parsedFolder = grouped ? parseName(parts[1]!) : parsedFile;
-        const title = parsedFolder.title || parsedFile.title;
-        const year = parsedFolder.year ?? parsedFile.year;
-        const candidates = kind === 'comic' || kind === 'music' ? [] : await findCandidates(kind, title, year);
-        const best = candidates[0];
-        const confident = best && best.confidence >= 0.75 && (candidates[1]?.confidence ?? 0) < best.confidence - 0.05;
-        if (confident) {
-          itemId = ensureItem({
-            mediaId: best.mediaId,
-            kind,
-            title: best.title,
-            year: best.year,
-            poster: best.poster,
-            overview: best.overview,
-            folder,
-            matchStatus: 'matched',
-            confidence: best.confidence,
-          });
-          if (best.mediaId.split(':')[0] !== 'book') await refreshMetadata(itemId).catch(() => undefined);
-        } else {
-          itemId = ensureItem({
-            mediaId: null,
-            kind,
-            title,
-            year,
-            poster: best?.poster ?? null,
-            folder,
-            matchStatus: kind === 'comic' || kind === 'music' ? 'unmatched' : 'review',
-            confidence: best?.confidence ?? 0,
-            candidates,
-          });
-          if (kind !== 'comic' && kind !== 'music') review++;
+      for (const f of walk(root.dir, root.dir)) {
+        const fk = fileKind(f.rel);
+        if (root.kind && fk !== 'book' && fk !== 'comic') continue;
+        const rel = root.prefix + f.rel;
+        seen.add(rel);
+        if (known.has(rel)) continue;
+        const parts = f.rel.split('/');
+        const parsedFile = parseName(f.rel);
+        let kind: LibraryKind | null = root.kind ? (root.kind === 'book' && fk === 'comic' ? 'comic' : root.kind) : kindFromPath(f.rel);
+        if (!kind) {
+          if (fk === 'book') kind = 'book';
+          else if (fk === 'comic') kind = 'comic';
+          else if (fk === 'audio') kind = 'music';
+          else if (parsedFile.animeStyle) kind = 'anime';
+          else kind = parsedFile.season != null || parsedFile.episode != null ? 'tv' : 'movie';
         }
+        // Shows, films and comic/manga series are one item per folder; books one per file.
+        const series = kind === 'comic' || kind === 'manga';
+        const depth = root.kind ? 1 : 2;
+        const grouped = (kind === 'tv' || kind === 'anime' || kind === 'movie' || series) && parts.length > depth;
+        const folder = root.prefix + (grouped ? parts.slice(0, depth).join('/') : f.rel);
+        const existing = db.prepare('SELECT id FROM library_items WHERE folder = ?').get(folder) as { id: string } | undefined;
+        let itemId = existing?.id;
+        if (!itemId) {
+          const parsedFolder = grouped ? parseName(parts[depth - 1]!) : parsedFile;
+          const title = (series && grouped ? parts[depth - 1]!.trim() : parsedFolder.title) || parsedFile.title;
+          const year = parsedFolder.year ?? parsedFile.year;
+          const candidates = UNMATCHED_KINDS.has(kind) ? [] : await findCandidates(kind, title, year);
+          const best = candidates[0];
+          const confident = best && best.confidence >= 0.75 && (candidates[1]?.confidence ?? 0) < best.confidence - 0.05;
+          if (confident) {
+            itemId = ensureItem({
+              mediaId: best.mediaId,
+              kind,
+              title: best.title,
+              year: best.year,
+              poster: best.poster,
+              overview: best.overview,
+              folder,
+              matchStatus: 'matched',
+              confidence: best.confidence,
+            });
+            if (best.mediaId.split(':')[0] !== 'book') await refreshMetadata(itemId).catch(() => undefined);
+          } else {
+            itemId = ensureItem({
+              mediaId: null,
+              kind,
+              title,
+              year,
+              poster: best?.poster ?? null,
+              folder,
+              matchStatus: UNMATCHED_KINDS.has(kind) ? 'unmatched' : 'review',
+              confidence: best?.confidence ?? 0,
+              candidates,
+            });
+            if (!UNMATCHED_KINDS.has(kind)) review++;
+          }
+        }
+        addFile(itemId, rel, f.size, parsedFile.season ?? (parsedFile.episode != null ? 1 : null), parsedFile.episode);
+        added++;
       }
-      addFile(itemId, f.rel, f.size, parsedFile.season ?? (parsedFile.episode != null ? 1 : null), parsedFile.episode);
-      added++;
     }
-    // Files that disappeared from disk.
+    // Files that disappeared from disk (folders that are offline right now excepted).
     let removed = 0;
     for (const rel of known) {
-      if (seen.has(rel)) continue;
+      if (seen.has(rel) || offline.some((p) => (p ? rel.startsWith(p) : !rel.startsWith('@')))) continue;
+      if (!libraryEnabled() && !rel.startsWith('@')) continue;
       db.prepare('DELETE FROM library_files WHERE path = ?').run(rel);
       removed++;
     }
@@ -468,7 +574,7 @@ export async function scanLibrary(): Promise<{ added: number; review: number; re
 
 export function storageStats(): { totalBytes: number; freeBytes: number; usedByLibrary: number; maxBytes: number | null } | null {
   if (!libraryEnabled()) return null;
-  const used = (db.prepare('SELECT COALESCE(SUM(size), 0) AS n FROM library_files').get() as { n: number }).n;
+  const used = (db.prepare("SELECT COALESCE(SUM(size), 0) AS n FROM library_files WHERE path NOT LIKE '@%'").get() as { n: number }).n;
   try {
     const s = fs.statfsSync(libraryRoot());
     return {

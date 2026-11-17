@@ -283,7 +283,8 @@ function wantFiles(t: Torrent, release: Release, ctx: MediaContext): number[] {
 }
 
 async function startTorrent(row: DownloadRow, stored: StoredRelease, magnet: string | null, buf: Buffer | null): Promise<void> {
-  const { client, find, markDownload } = engine();
+  const { client: getClient, find, markDownload } = engine();
+  const client = await getClient();
   const dir = incomingDir(row.id);
   fs.mkdirSync(dir, { recursive: true });
   const hashMatch = magnet?.match(/btih:([a-fA-F0-9]{40})/);

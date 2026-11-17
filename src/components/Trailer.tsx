@@ -52,6 +52,20 @@ export function Trailer({ videoKey, onFail, controls = true, className }: { vide
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [videoKey]);
 
+  // The YouTube player can take focus (e.g. on its error screen) and the browser then scrolls the
+  // page up to it. Keep the reader where they were.
+  useEffect(() => {
+    const onBlur = () => {
+      if (document.activeElement !== ref.current) return;
+      const y = window.scrollY;
+      const restore = () => Math.abs(window.scrollY - y) > 1 && window.scrollTo({ top: y, behavior: 'instant' });
+      requestAnimationFrame(restore);
+      window.setTimeout(restore, 120);
+    };
+    window.addEventListener('blur', onBlur);
+    return () => window.removeEventListener('blur', onBlur);
+  }, []);
+
   const origin = window.location.origin;
   const src =
     `https://www.youtube-nocookie.com/embed/${videoKey}?autoplay=1&mute=1&controls=0&loop=1&playlist=${videoKey}` +
@@ -65,6 +79,8 @@ export function Trailer({ videoKey, onFail, controls = true, className }: { vide
           title="Trailer"
           src={src}
           allow="autoplay; encrypted-media"
+          // YouTube refuses embeds without a referrer (error 153); the page itself sends none.
+          referrerPolicy="strict-origin-when-cross-origin"
           onLoad={() => ref.current?.contentWindow?.postMessage(JSON.stringify({ event: 'listening', id: 1, channel: 'widget' }), '*')}
           className="pointer-events-none absolute top-1/2 left-1/2 h-[max(100%,56.25cqw)] w-[max(100%,177.78cqh)] -translate-x-1/2 -translate-y-1/2 scale-[1.18] transition-opacity duration-500"
           style={{ opacity: visible && !paused ? 1 : 0 }}

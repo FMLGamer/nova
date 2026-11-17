@@ -1,0 +1,365 @@
+/**
+ * Anime tracking with AniList and MyAnimeList: each profile connects its own account, finished
+ * episodes are written to its list, and the list status can be changed from the title page.
+ * Also finds the episode discussion threads on both sites (public, no account needed).
+ */
+import crypto from 'node:crypto';
+import { db } from '../db/index.js';
+import { cached } from '../lib/cache.js';
+import { seal, signToken, unseal, verifyToken } from '../lib/crypto.js';
+import { HttpError } from '../lib/http.js';
+import { detailFor } from './catalog.js';
+import { integration } from './integrations.js';
+
+export type TrackerService = 'anilist' | 'mal';
+/** One vocabulary for both sites. */
+export type TrackStatus = 'watching' | 'completed' | 'planning' | 'paused' | 'dropped';
+
+export interface TrackEntry {
+  status: TrackStatus | null;
+  progress: number;
+  score: number | null;
+  url: string;
+}
+
+interface AccountRow {
+  profile_id: string;
+  service: TrackerService;
+  token: string;
+  refresh_token: string | null;
+  expires_at: number | null;
+  user_id: string | null;
+  user_name: string | null;
+  avatar: string | null;
+}
+
+const ANILIST = 'https://graphql.anilist.co';
+const MAL_API = 'https://api.myanimelist.net/v2';
+const MAL_OAUTH = 'https://myanimelist.net/v1/oauth2';
+
+function account(profileId: string, service: TrackerService): AccountRow | null {
+  return (db.prepare('SELECT * FROM tracker_accounts WHERE profile_id = ? AND service = ?').get(profileId, service) as AccountRow | undefined) ?? null;
+}
+
+function saveAccount(profileId: string, service: TrackerService, a: { token: string; refresh?: string | null; expiresAt?: number | null; userId: string; name: string; avatar: string | null }): void {
+  db.prepare(
+    `INSERT INTO tracker_accounts (profile_id, service, token, refresh_token, expires_at, user_id, user_name, avatar) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(profile_id, service) DO UPDATE SET token = excluded.token, refresh_token = excluded.refresh_token, expires_at = excluded.expires_at,
+       user_id = excluded.user_id, user_name = excluded.user_name, avatar = excluded.avatar`,
+  ).run(profileId, service, seal(a.token), a.refresh ? seal(a.refresh) : null, a.expiresAt ?? null, a.userId, a.name, a.avatar);
+}
+
+export function disconnect(profileId: string, service: TrackerService): void {
+  db.prepare('DELETE FROM tracker_accounts WHERE profile_id = ? AND service = ?').run(profileId, service);
+}
+
+export function trackerStatus(profileId: string) {
+  const view = (s: TrackerService) => {
+    const a = account(profileId, s);
+    return a ? { connected: true, user: a.user_name, avatar: a.avatar, expiresAt: a.expires_at } : { connected: false, user: null, avatar: null, expiresAt: null };
+  };
+  return {
+    anilist: { ...view('anilist'), clientId: integration('anilistClientId') || null },
+    mal: { ...view('mal'), configured: Boolean(integration('malClientId')) },
+  };
+}
+
+async function request<T>(url: string, init: RequestInit, what: string): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(12_000) });
+  } catch {
+    throw new HttpError(502, `${what} could not be reached`);
+  }
+  if (res.status === 401) throw new HttpError(401, `${what} rejected the sign-in; connect the account again in Settings → Tracking`);
+  if (!res.ok) throw new HttpError(502, `${what} answered ${res.status}`);
+  return (await res.json()) as T;
+}
+
+// ---------------------------------------------------------------- AniList
+
+async function anilistGql<T>(query: string, variables: Record<string, unknown>, token?: string): Promise<T> {
+  const r = await request<{ data: T; errors?: { message: string }[] }>(
+    ANILIST,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: JSON.stringify({ query, variables }),
+    },
+    'AniList',
+  );
+  if (r.errors?.length) throw new HttpError(502, `AniList: ${r.errors[0]!.message}`);
+  return r.data;
+}
+
+/** AniList hands out year-long tokens (no refresh); the expiry is inside the JWT. */
+function jwtExpiry(token: string): number | null {
+  try {
+    const exp = (JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8')) as { exp?: number }).exp;
+    return typeof exp === 'number' ? exp : null;
+  } catch {
+    return null;
+  }
+}
+
+export function anilistAuthorizeUrl(): string | null {
+  const id = integration('anilistClientId');
+  return id ? `https://anilist.co/api/v2/oauth/authorize?client_id=${encodeURIComponent(id)}&response_type=token` : null;
+}
+
+export async function connectAnilist(profileId: string, token: string): Promise<void> {
+  const t = token.trim().replace(/^Bearer\s+/i, '');
+  const { Viewer } = await anilistGql<{ Viewer: { id: number; name: string; avatar: { medium: string | null } | null } }>(
+    'query { Viewer { id name avatar { medium } } }',
+    {},
+    t,
+  ).catch((err: unknown) => {
+    if (err instanceof HttpError && /could not be reached/.test(err.message)) throw err;
+    throw new HttpError(400, "AniList didn't accept that token. Copy the whole token from AniList's page and try again.");
+  });
+  saveAccount(profileId, 'anilist', { token: t, expiresAt: jwtExpiry(t), userId: String(Viewer.id), name: Viewer.name, avatar: Viewer.avatar?.medium ?? null });
+}
+
+const ANI_STATUS: Record<TrackStatus, string> = { watching: 'CURRENT', completed: 'COMPLETED', planning: 'PLANNING', paused: 'PAUSED', dropped: 'DROPPED' };
+const fromAni = (s: string | null | undefined): TrackStatus | null =>
+  s === 'CURRENT' || s === 'REPEATING' ? 'watching' : s === 'COMPLETED' ? 'completed' : s === 'PLANNING' ? 'planning' : s === 'PAUSED' ? 'paused' : s === 'DROPPED' ? 'dropped' : null;
+
+async function anilistEntry(token: string, anilistId: number): Promise<TrackEntry & { episodes: number | null }> {
+  const { Media } = await anilistGql<{ Media: { episodes: number | null; siteUrl: string; mediaListEntry: { status: string; progress: number; score: number | null } | null } }>(
+    'query ($id: Int) { Media(id: $id, type: ANIME) { episodes siteUrl mediaListEntry { status progress score(format: POINT_10_DECIMAL) } } }',
+    { id: anilistId },
+    token,
+  );
+  const e = Media.mediaListEntry;
+  return { status: fromAni(e?.status), progress: e?.progress ?? 0, score: e?.score || null, url: Media.siteUrl, episodes: Media.episodes };
+}
+
+async function anilistSave(token: string, anilistId: number, patch: { status?: TrackStatus; progress?: number }): Promise<void> {
+  await anilistGql(
+    'mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int) { SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress) { id } }',
+    { mediaId: anilistId, status: patch.status ? ANI_STATUS[patch.status] : undefined, progress: patch.progress },
+    token,
+  );
+}
+
+// ---------------------------------------------------------------- MyAnimeList
+
+function malCredentials(): { id: string; secret: string } {
+  const id = integration('malClientId');
+  if (!id) throw new HttpError(409, 'MyAnimeList is not set up on this server yet (Server → Overview → Integrations)');
+  return { id, secret: integration('malClientSecret') };
+}
+
+/** Starts the OAuth sign-in. PKCE \"plain\": MyAnimeList supports nothing else. */
+export function malAuthorizeUrl(profileId: string, redirectUri: string): string {
+  const { id } = malCredentials();
+  const verifier = crypto.randomBytes(48).toString('base64url');
+  const state = signToken({ p: profileId, v: verifier, r: redirectUri }, 15 * 60);
+  const q = new URLSearchParams({ response_type: 'code', client_id: id, state, redirect_uri: redirectUri, code_challenge: verifier, code_challenge_method: 'plain' });
+  return `${MAL_OAUTH}/authorize?${q}`;
+}
+
+async function malTokens(form: Record<string, string>): Promise<{ access_token: string; refresh_token: string; expires_in: number }> {
+  const { id, secret } = malCredentials();
+  return request(
+    `${MAL_OAUTH}/token`,
+    { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: id, ...(secret ? { client_secret: secret } : {}), ...form }) },
+    'MyAnimeList',
+  );
+}
+
+export async function malCallback(code: string, state: string): Promise<void> {
+  const s = verifyToken<{ p: string; v: string; r: string }>(state);
+  if (!s) throw new HttpError(400, 'This sign-in link expired; start again from Nova');
+  const t = await malTokens({ grant_type: 'authorization_code', code, code_verifier: s.v, redirect_uri: s.r });
+  const me = await request<{ id: number; name: string; picture?: string }>(`${MAL_API}/users/@me`, { headers: { Authorization: `Bearer ${t.access_token}` } }, 'MyAnimeList');
+  saveAccount(s.p, 'mal', {
+    token: t.access_token,
+    refresh: t.refresh_token,
+    expiresAt: Math.floor(Date.now() / 1000) + t.expires_in,
+    userId: String(me.id),
+    name: me.name,
+    avatar: me.picture ?? null,
+  });
+}
+
+/** MyAnimeList tokens last a month; renew a day early. */
+async function malAccessToken(a: AccountRow): Promise<string> {
+  if (!a.expires_at || a.expires_at - Date.now() / 1000 > 86_400) return unseal(a.token);
+  const t = await malTokens({ grant_type: 'refresh_token', refresh_token: unseal(a.refresh_token) });
+  db.prepare('UPDATE tracker_accounts SET token = ?, refresh_token = ?, expires_at = ? WHERE profile_id = ? AND service = ?').run(
+    seal(t.access_token),
+    seal(t.refresh_token),
+    Math.floor(Date.now() / 1000) + t.expires_in,
+    a.profile_id,
+    'mal',
+  );
+  return t.access_token;
+}
+
+const MAL_STATUS: Record<TrackStatus, string> = { watching: 'watching', completed: 'completed', planning: 'plan_to_watch', paused: 'on_hold', dropped: 'dropped' };
+const fromMal = (s: string | undefined): TrackStatus | null =>
+  s === 'watching' ? 'watching' : s === 'completed' ? 'completed' : s === 'plan_to_watch' ? 'planning' : s === 'on_hold' ? 'paused' : s === 'dropped' ? 'dropped' : null;
+
+async function malEntry(token: string, malId: number): Promise<TrackEntry & { episodes: number | null }> {
+  const r = await request<{ num_episodes?: number; my_list_status?: { status?: string; num_episodes_watched?: number; score?: number } }>(
+    `${MAL_API}/anime/${malId}?fields=num_episodes,my_list_status`,
+    { headers: { Authorization: `Bearer ${token}` } },
+    'MyAnimeList',
+  );
+  const e = r.my_list_status;
+  return { status: fromMal(e?.status), progress: e?.num_episodes_watched ?? 0, score: e?.score || null, url: `https://myanimelist.net/anime/${malId}`, episodes: r.num_episodes || null };
+}
+
+async function malSave(token: string, malId: number, patch: { status?: TrackStatus; progress?: number }): Promise<void> {
+  const body = new URLSearchParams();
+  if (patch.status) body.set('status', MAL_STATUS[patch.status]);
+  if (patch.progress != null) body.set('num_watched_episodes', String(patch.progress));
+  await request(`${MAL_API}/anime/${malId}/my_list_status`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' }, body }, 'MyAnimeList');
+}
+
+// ---------------------------------------------------------------- entries
+
+async function ids(mediaId: string): Promise<{ anilist: number; mal: number | null }> {
+  const m = /^anime:(\d+)$/.exec(mediaId);
+  if (!m) throw new HttpError(400, 'Only anime can be tracked');
+  const detail = await detailFor(mediaId).catch(() => null);
+  return { anilist: Number(m[1]), mal: detail?.malId ?? null };
+}
+
+export async function getEntries(profileId: string, mediaId: string): Promise<{ anilist?: TrackEntry | null; mal?: TrackEntry | null; episodes: number | null }> {
+  const id = await ids(mediaId);
+  const out: { anilist?: TrackEntry | null; mal?: TrackEntry | null; episodes: number | null } = { episodes: null };
+  const ani = account(profileId, 'anilist');
+  const mal = account(profileId, 'mal');
+  await Promise.all([
+    ani &&
+      anilistEntry(unseal(ani.token), id.anilist).then(({ episodes, ...e }) => {
+        out.anilist = e;
+        out.episodes ??= episodes;
+      }),
+    mal &&
+      (id.mal
+        ? malAccessToken(mal)
+            .then((t) => malEntry(t, id.mal!))
+            .then(({ episodes, ...e }) => {
+              out.mal = e;
+              out.episodes ??= episodes;
+            })
+        : (out.mal = null)),
+  ]);
+  return out;
+}
+
+export async function setEntries(profileId: string, mediaId: string, patch: { status?: TrackStatus; progress?: number }): Promise<void> {
+  const id = await ids(mediaId);
+  const ani = account(profileId, 'anilist');
+  const mal = account(profileId, 'mal');
+  if (!ani && !mal) throw new HttpError(409, 'Connect AniList or MyAnimeList in Settings → Tracking first');
+  await Promise.all([ani && anilistSave(unseal(ani.token), id.anilist, patch), mal && id.mal && malAccessToken(mal).then((t) => malSave(t, id.mal!, patch))]);
+}
+
+const pushed = new Map<string, number>();
+
+/** A finished episode moves the list forward (never back: rewatching an old episode changes nothing). */
+export async function trackWatched(profileId: string, mediaId: string, episode: number): Promise<void> {
+  if (!/^anime:\d+$/.test(mediaId)) return;
+  const key = `${profileId}:${mediaId}`;
+  if ((pushed.get(key) ?? 0) >= episode) return;
+  const ani = account(profileId, 'anilist');
+  const mal = account(profileId, 'mal');
+  if (!ani && !mal) return;
+  pushed.set(key, episode);
+  const id = await ids(mediaId);
+  const advance = async (entry: TrackEntry & { episodes: number | null }, save: (p: { status?: TrackStatus; progress?: number }) => Promise<void>) => {
+    if (entry.progress >= episode && entry.status !== 'planning') return;
+    const done = entry.episodes != null && episode >= entry.episodes;
+    await save({ progress: Math.max(entry.progress, episode), status: done ? 'completed' : 'watching' });
+  };
+  const jobs: Promise<void>[] = [];
+  if (ani) {
+    const token = unseal(ani.token);
+    jobs.push(anilistEntry(token, id.anilist).then((e) => advance(e, (p) => anilistSave(token, id.anilist, p))));
+  }
+  if (mal && id.mal) {
+    jobs.push(
+      malAccessToken(mal).then(async (token) => {
+        const e = await malEntry(token, id.mal!);
+        await advance(e, (p) => malSave(token, id.mal!, p));
+      }),
+    );
+  }
+  const results = await Promise.allSettled(jobs);
+  for (const r of results) if (r.status === 'rejected') console.error('[trackers] update failed:', r.reason instanceof Error ? r.reason.message : r.reason);
+}
+
+// ---------------------------------------------------------------- episode discussions
+
+export interface Discussion {
+  site: 'AniList' | 'MyAnimeList';
+  title: string;
+  url: string;
+  comments: number | null;
+}
+
+/** "Episode 5 Discussion" or "Episodes 1-4 Discussion" covering episode n. */
+function covers(title: string, n: number): boolean {
+  const m = /\bepisodes?\s*(\d+)(?:\s*[-\u2013~]\s*(\d+))?/i.exec(title);
+  if (!m) return false;
+  const from = Number(m[1]);
+  return n >= from && n <= Number(m[2] ?? from);
+}
+
+/** AniList's thread search ignores titles, so read the show's threads (oldest first). */
+function anilistThreads(anilistId: number): Promise<{ title: string; siteUrl: string; replyCount: number }[]> {
+  return cached(`threads:${anilistId}`, 60 * 60_000, async () => {
+    const out: { title: string; siteUrl: string; replyCount: number }[] = [];
+    for (let page = 1; page <= 4; page++) {
+      const { Page } = await anilistGql<{ Page: { pageInfo: { hasNextPage: boolean }; threads: { title: string; siteUrl: string; replyCount: number }[] } }>(
+        'query ($id: Int, $page: Int) { Page(page: $page, perPage: 50) { pageInfo { hasNextPage } threads(mediaCategoryId: $id, sort: ID) { title siteUrl replyCount } } }',
+        { id: anilistId, page },
+      );
+      out.push(...Page.threads);
+      if (!Page.pageInfo.hasNextPage) break;
+    }
+    return out;
+  });
+}
+
+async function malThread(malId: number, title: string, n: number): Promise<Discussion> {
+  try {
+    const r = await fetch(`https://api.jikan.moe/v4/anime/${malId}/forum?filter=episode`, { signal: AbortSignal.timeout(6000) });
+    const t = r.ok ? ((await r.json()) as { data: { title: string; url: string; comments: number }[] }).data.find((x) => covers(x.title, n)) : undefined;
+    if (t) return { site: 'MyAnimeList', title: t.title, url: t.url, comments: t.comments };
+  } catch {
+    /* Jikan is a volunteer mirror and sometimes down */
+  }
+  const clientId = integration('malClientId');
+  if (clientId) {
+    try {
+      const q = new URLSearchParams({ q: `${title} Episode ${n} Discussion`, limit: '10' });
+      const r = await request<{ data: { id: number; title: string; number_of_posts: number }[] }>(`${MAL_API}/forum/topics?${q}`, { headers: { 'X-MAL-CLIENT-ID': clientId } }, 'MyAnimeList');
+      const t = r.data.find((x) => covers(x.title, n));
+      if (t) return { site: 'MyAnimeList', title: t.title, url: `https://myanimelist.net/forum/?topicid=${t.id}`, comments: t.number_of_posts };
+    } catch {
+      /* fall back to the episode page */
+    }
+  }
+  // MyAnimeList's episode page links its discussion thread.
+  return { site: 'MyAnimeList', title: `Episode ${n} on MyAnimeList`, url: `https://myanimelist.net/anime/${malId}/_/episode/${n}`, comments: null };
+}
+
+export async function discussions(mediaId: string, episode: number): Promise<Discussion[]> {
+  const id = await ids(mediaId);
+  const detail = await detailFor(mediaId).catch(() => null);
+  return cached(`discuss:${mediaId}:${episode}`, 60 * 60_000, async () => {
+    const [ani, mal] = await Promise.allSettled([anilistThreads(id.anilist), id.mal ? malThread(id.mal, detail?.title ?? '', episode) : Promise.reject(new Error('no MAL id'))]);
+    const out: Discussion[] = [];
+    if (ani.status === 'fulfilled') {
+      const t = ani.value.find((x) => covers(x.title, episode));
+      if (t) out.push({ site: 'AniList', title: t.title.trim(), url: t.siteUrl, comments: t.replyCount });
+    }
+    if (mal.status === 'fulfilled') out.push(mal.value);
+    return out;
+  });
+}

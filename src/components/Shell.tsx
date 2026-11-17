@@ -4,6 +4,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   Bell,
   BookOpen,
+  Bug,
   Clapperboard,
   Film,
   House,
@@ -22,7 +23,7 @@ import {
 } from 'lucide-react';
 import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
-import { cls, relTime } from '../lib/format';
+import { cls, relTime, reportIssueUrl } from '../lib/format';
 import { useAppConfig, useContributions, useNotifications, usePrefs, useProfile, useSession } from '../lib/queries';
 import { useApp } from '../lib/store';
 import { Avatar, Menu, MenuItem, Spinner, Toaster } from './ui';
@@ -201,6 +202,17 @@ function ProfileMenu() {
               </MenuItem>
             ))}
             <div className="my-1.5 h-px bg-line" />
+            {appConfig?.projectUrl && (
+              <MenuItem
+                icon={<Bug />}
+                onClick={() => {
+                  close();
+                  window.open(reportIssueUrl(appConfig), '_blank', 'noopener');
+                }}
+              >
+                Report a problem
+              </MenuItem>
+            )}
             {session.profiles.length > 1 && (
               <MenuItem
                 icon={<Users />}

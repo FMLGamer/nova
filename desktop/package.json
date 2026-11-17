@@ -1,7 +1,7 @@
 {
   "name": "nova-desktop",
   "productName": "Nova",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Nova for Windows: your media, your plugins, streamed on your own computer.",
   "license": "MIT",
   "author": "Nova contributors",
@@ -10,7 +10,7 @@
   "scripts": {
     "stage": "node scripts/stage.mjs",
     "start": "electron .",
-    "dist": "node scripts/stage.mjs && electron-builder --win nsis portable --publish never"
+    "dist": "node scripts/stage.mjs && electron-builder --win nsis portable zip --publish never"
   },
   "devDependencies": {
     "electron": "45.3.3",
@@ -40,7 +40,8 @@
       "icon": "build/icon.ico",
       "target": [
         "nsis",
-        "portable"
+        "portable",
+        "zip"
       ]
     },
     "nsis": {
@@ -52,7 +53,11 @@
       "artifactName": "Nova-Setup-${version}.${ext}"
     },
     "portable": {
-      "artifactName": "Nova-Portable-${version}.${ext}"
+      "artifactName": "Nova-Portable-${version}.${ext}",
+      "splashImage": "build/splash.bmp"
+    },
+    "zip": {
+      "artifactName": "Nova-${version}-win.${ext}"
     }
   }
 }

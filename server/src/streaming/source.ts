@@ -8,6 +8,7 @@ import { db } from '../db/index.js';
 import { signToken, verifyToken } from '../lib/crypto.js';
 import { getFile, mimeForName, torrentStatus } from '../services/torrentEngine.js';
 import { mkvInfo } from '../services/embeddedSubs.js';
+import { libraryFilePath } from '../library/library.js';
 import { TEXT_SUBTITLE_CODECS, isFont, type MkvInfo } from '../media/matroska.js';
 
 /**
@@ -69,11 +70,10 @@ interface LibraryFileRow {
 }
 
 export function librarySource(fileId: string): MediaSource | null {
-  if (!config.library.dir) return null;
   const row = db.prepare('SELECT id, path, size, mime FROM library_files WHERE id = ?').get(fileId) as LibraryFileRow | undefined;
   if (!row) return null;
-  const abs = path.resolve(config.library.dir, row.path);
-  if (!abs.startsWith(path.resolve(config.library.dir))) return null;
+  const abs = libraryFilePath(row.path);
+  if (!abs) return null;
   let size = row.size;
   try {
     size = fs.statSync(abs).size;

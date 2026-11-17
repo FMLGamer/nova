@@ -7,7 +7,16 @@ import { config } from '../config.js';
 import { db } from '../db/index.js';
 import { seal, unseal } from '../lib/crypto.js';
 
-export const INTEGRATION_KEYS = ['tmdbApiKey', 'openSubtitlesApiKey', 'openSubtitlesUsername', 'openSubtitlesPassword', 'deeplApiKey'] as const;
+export const INTEGRATION_KEYS = [
+  'tmdbApiKey',
+  'openSubtitlesApiKey',
+  'openSubtitlesUsername',
+  'openSubtitlesPassword',
+  'deeplApiKey',
+  'anilistClientId',
+  'malClientId',
+  'malClientSecret',
+] as const;
 export type IntegrationKey = (typeof INTEGRATION_KEYS)[number];
 
 const fromEnv: Record<IntegrationKey, () => string> = {
@@ -16,6 +25,9 @@ const fromEnv: Record<IntegrationKey, () => string> = {
   openSubtitlesUsername: () => config.openSubtitles.username,
   openSubtitlesPassword: () => config.openSubtitles.password,
   deeplApiKey: () => config.deeplApiKey,
+  anilistClientId: () => config.trackers.anilistClientId,
+  malClientId: () => config.trackers.malClientId,
+  malClientSecret: () => config.trackers.malClientSecret,
 };
 
 const memo = new Map<IntegrationKey, string>();

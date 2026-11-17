@@ -6,14 +6,14 @@
 import express, { Router, type Request } from 'express';
 import http from 'node:http';
 import { z } from 'zod';
-import { requireAuth } from '../auth/middleware.js';
+import { requireAdmin, requireAuth } from '../auth/middleware.js';
 import { config } from '../config.js';
 import { db } from '../db/index.js';
 import { asyncHandler } from '../lib/async.js';
 import { randomToken } from '../lib/crypto.js';
 import { HttpError, parse, publicUrl } from '../lib/http.js';
 import { Chromecast } from './castv2.js';
-import { addressFacing, discoverDevices, knownDevice, lanAddresses, type CastDevice } from './discovery.js';
+import { addDevice, addressFacing, discoverDevices, knownDevice, lanAddresses, removeDevice, type CastDevice } from './discovery.js';
 import { DlnaRenderer } from './dlna.js';
 import { castMedia, createCastMedia, endCastMedia, type CastMedia, type CastSubtitle } from './media.js';
 
@@ -130,7 +130,27 @@ castRouter.get(
   '/devices',
   asyncHandler(async (req, res) => {
     const devices = await discoverDevices(req.query.refresh === '1');
-    res.json({ devices: devices.map(({ id, name, kind, model }) => ({ id, name, kind, model })) });
+    res.json({ devices: devices.map(({ id, name, kind, model, saved }) => ({ id, name, kind, model, saved: Boolean(saved) })) });
+  }),
+);
+
+// TVs the scan can't see are added by address. Server-wide, so admins only.
+castRouter.post(
+  '/devices',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { address } = parse(z.object({ address: z.string().min(2).max(500) }), req.body);
+    const d = await addDevice(address);
+    res.status(201).json({ device: { id: d.id, name: d.name, kind: d.kind, model: d.model, saved: true } });
+  }),
+);
+
+castRouter.delete(
+  '/devices/:id',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    await removeDevice(req.params.id);
+    res.status(204).end();
   }),
 );
 

@@ -147,7 +147,8 @@ export function SourcePicker({
           className={cls('group relative w-full overflow-hidden rounded-2xl border p-4 text-left transition', current === best.id ? 'border-white/40 bg-white/10' : 'border-line-strong bg-white/[0.05] hover:bg-white/[0.08]')}
         >
           <div className="mb-2 flex items-center gap-2 text-xs font-semibold tracking-wider text-accent uppercase">
-            <Sparkles className="size-3.5" /> Best match
+            <Sparkles className="size-3.5" /> {best.tier === 0 ? 'Best match' : 'Closest match'}
+            {best.tier === 1 && best.misses?.length ? <span className="font-normal tracking-normal text-warn normal-case">· outside your settings: {best.misses.join(', ')}</span> : null}
           </div>
           <div className="flex items-center gap-4">
             <div className="min-w-0 flex-1">
@@ -205,6 +206,7 @@ function ReleaseRow({ r, current, onPick, onServerDownload }: { r: Release; curr
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
           <ReleaseTags r={r} />
           <Meta r={r} />
+          {r.tier === 1 && r.misses?.length ? <span className="text-xs text-warn">Not in your settings: {r.misses.join(', ')}</span> : null}
         </div>
       </button>
       {onServerDownload && (

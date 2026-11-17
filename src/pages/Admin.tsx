@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { NavLink, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -11,6 +11,7 @@ import {
   Database,
   Download,
   FlaskConical,
+  FolderPlus,
   Globe,
   HardDrive,
   Library,
@@ -28,9 +29,9 @@ import {
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { cls, fmtBytes, relTime } from '../lib/format';
-import { useSession } from '../lib/queries';
+import { useAppConfig, useSession } from '../lib/queries';
 import { errorText, toast } from '../lib/store';
-import type { AccountSettings, ConfigField, DirectoryChannel, InstallPreview, LibraryItem, PermissionSummary, PluginInfo } from '../lib/types';
+import type { AccountSettings, ConfigField, DirectoryChannel, InstallPreview, LibraryItem, LibrarySource, PermissionSummary, PluginInfo } from '../lib/types';
 import { Badge, Button, Card, Chip, Empty, Input, Modal, Row, Segmented, Select, Spinner, Switch, TextArea } from '../components/ui';
 import { LiveVideo } from './Live';
 
@@ -112,6 +113,33 @@ const INTEGRATIONS: { key: string; label: string; hint: ReactNode; secret?: bool
   { key: 'openSubtitlesUsername', label: 'OpenSubtitles username', hint: 'Needed to download subtitles.' },
   { key: 'openSubtitlesPassword', label: 'OpenSubtitles password', hint: 'Stored encrypted.', secret: true },
   { key: 'deeplApiKey', label: 'DeepL API key', hint: 'Optional: better subtitle translation.', secret: true },
+  {
+    key: 'anilistClientId',
+    label: 'AniList client ID',
+    hint: (
+      <>
+        Optional: one-click AniList tracking for everyone. Create a client at{' '}
+        <a className="underline" href="https://anilist.co/settings/developer" target="_blank" rel="noreferrer">
+          anilist.co/settings/developer
+        </a>{' '}
+        with redirect URL <code>https://anilist.co/api/v2/oauth/pin</code>.
+      </>
+    ),
+  },
+  {
+    key: 'malClientId',
+    label: 'MyAnimeList client ID',
+    hint: (
+      <>
+        Optional: lets people connect MyAnimeList. Create an app (type “web”) at{' '}
+        <a className="underline" href="https://myanimelist.net/apiconfig" target="_blank" rel="noreferrer">
+          myanimelist.net/apiconfig
+        </a>{' '}
+        with redirect URL <code className="break-all">{`${window.location.origin}/api/trackers/mal/callback`}</code>.
+      </>
+    ),
+  },
+  { key: 'malClientSecret', label: 'MyAnimeList client secret', hint: 'The secret of that MyAnimeList app.', secret: true },
 ];
 
 function Integrations() {
@@ -658,9 +686,86 @@ function ReviewItem({ item, pick, onPick }: { item: LibraryItem; pick: string | 
   );
 }
 
+function ReadingFolders() {
+  const act = useAct();
+  const qc = useQueryClient();
+  const { data: cfg } = useAppConfig();
+  const sources = useQuery({ queryKey: ['library-sources'], queryFn: api.server.sources });
+  const [path, setPath] = useState('');
+  const [kind, setKind] = useState<LibrarySource['kind']>('book');
+  const [busy, setBusy] = useState(false);
+  const add = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await api.server.addSource({ path: path.trim(), kind });
+      toast(`Added ${r.source.name} · ${r.result.added} file${r.result.added === 1 ? '' : 's'} found`, 'ok');
+      setPath('');
+      for (const k of [['library-sources'], ['server-items'], ['server-status']]) qc.invalidateQueries({ queryKey: k });
+    } catch (err) {
+      toast(errorText(err), 'bad');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Card>
+      <h3 className="font-display text-lg font-semibold">Reading folders</h3>
+      <p className="mt-1 text-sm text-muted">
+        Folders of e-books (EPUB, PDF), comics (CBZ) and manga on {cfg?.mode === 'desktop' ? 'this computer' : 'the server'}. Nova reads them where they are and never changes
+        or deletes anything in them. Comics and manga are grouped by their top folder (one series per folder).
+      </p>
+      <div className="mt-3 divide-y divide-line">
+        {sources.data?.map((s) => (
+          <Row
+            key={s.id}
+            label={
+              <span className="flex items-center gap-2">
+                {s.name} <Badge>{s.kind === 'book' ? 'Books' : s.kind === 'comic' ? 'Comics' : 'Manga'}</Badge> {!s.available && <Badge tone="bad">Offline</Badge>}
+              </span>
+            }
+            hint={`${s.path} · ${s.fileCount} file${s.fileCount === 1 ? '' : 's'}`}
+          >
+            <button
+              onClick={() => act(() => api.server.removeSource(s.id), 'Folder removed (its files are untouched)', [['library-sources'], ['server-items']])}
+              aria-label={`Remove ${s.name}`}
+              className="rounded-lg p-2 text-muted hover:text-bad"
+            >
+              <Trash2 className="size-4" />
+            </button>
+          </Row>
+        ))}
+      </div>
+      <form onSubmit={add} className="mt-4 flex flex-wrap items-center gap-2">
+        <Input
+          value={path}
+          onChange={(e) => setPath(e.target.value)}
+          placeholder={cfg?.mode === 'desktop' ? 'C:\\Users\\you\\Documents\\Comics' : '/media/books'}
+          aria-label="Folder path"
+          className="min-w-56 flex-1"
+        />
+        <Segmented
+          size="sm"
+          value={kind}
+          onChange={setKind}
+          options={[
+            { value: 'book', label: 'Books' },
+            { value: 'comic', label: 'Comics' },
+            { value: 'manga', label: 'Manga' },
+          ]}
+        />
+        <Button type="submit" variant="white" loading={busy} disabled={!path.trim()} icon={<FolderPlus className="size-4" />}>
+          Add folder
+        </Button>
+      </form>
+    </Card>
+  );
+}
+
 function LibraryAdmin() {
   const act = useAct();
   const status = useQuery({ queryKey: ['server-status'], queryFn: api.server.status });
+  const sources = useQuery({ queryKey: ['library-sources'], queryFn: api.server.sources });
   const review = useQuery({ queryKey: ['review'], queryFn: api.server.review });
   const profiles = useQuery({ queryKey: ['quality-profiles'], queryFn: api.server.qualityProfiles });
   const [picks, setPicks] = useState<Record<string, string>>({});
@@ -673,13 +778,15 @@ function LibraryAdmin() {
           <div className="mr-auto">
             <h3 className="font-display text-lg font-semibold">Server library</h3>
             <p className="text-sm text-muted">
-              {status.data?.enabled ? `Scanned ${status.data.lastScan ? relTime(status.data.lastScan.at) : 'never'} · ${fmtBytes(status.data.storage.freeBytes)} free` : 'No library folder is configured on the server (LIBRARY_DIR).'}
+              {status.data?.enabled
+                ? `Scanned ${status.data.lastScan ? relTime(status.data.lastScan.at) : 'never'} · ${fmtBytes(status.data.storage.freeBytes)} free`
+                : 'No library folder for downloads is configured on the server (LIBRARY_DIR). Reading folders below still work.'}
             </p>
           </div>
           <Button
             variant="primary"
             loading={scanning}
-            disabled={!status.data?.enabled}
+            disabled={!status.data?.enabled && !sources.data?.length}
             icon={<RefreshCw className="size-4" />}
             onClick={async () => {
               setScanning(true);
@@ -694,6 +801,8 @@ function LibraryAdmin() {
           </Button>
         </div>
       </Card>
+
+      <ReadingFolders />
 
       <div>
         <div className="mb-3 flex items-center gap-3">
@@ -720,7 +829,7 @@ function LibraryAdmin() {
             <Row
               key={q.id}
               label={<span className="flex items-center gap-2">{q.name} {q.isDefault && <Badge tone="accent">Default</Badge>}</span>}
-              hint={`${q.torrent.preferredQualities.join(' › ')} · up to ${q.torrent.maxQuality} · ≤ ${q.torrent.maxSizeGb} GB · ${q.torrent.preferredCodecs.join('/')}`}
+              hint={`${q.torrent.qualities.map((x) => (x === '2160p' ? '4K' : x)).join(', ')} · ≤ ${q.torrent.maxSizeGb} GB · ${q.torrent.codecs.join('/')}${q.torrent.allowHdr ? ' · HDR' : ''}`}
             >
               <div className="flex gap-1">
                 {!q.isDefault && (

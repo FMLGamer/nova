@@ -13,18 +13,11 @@ export interface RankQuery {
 /** The subset of preferences that drives ranking (a quality profile has the same shape). */
 export type RankPrefs = Pick<Preferences, 'torrent' | 'anime'>;
 
-const QUALITY_RANK: Record<string, number> = { '2160p': 4, '1080p': 3, '720p': 2, '480p': 1 };
-const AUDIO_BROWSER_OK = new Set(['aac', 'opus', 'mp3']);
-const AUDIO_BROWSER_BAD = new Set(['ac3', 'eac3', 'dts', 'truehd', 'flac']);
-
 /**
- * Strictly tiered weights: every tier's maximum is smaller than one step of the
- * tier above, so a lower tier only ever breaks ties inside a higher one. That
- * stops (say) a nice audio codec from dragging a 720p file above the 1080p the
- * user asked for, and keeps seeders a pure tie-breaker.
- *
- *   right title > right episode > language > instant (debrid) > quality > codec
- *   > subtitles > audio > format > seeders
+ * Video sources are ordered by what is *correct* first (the right film, the right episode,
+ * a language the viewer understands, instant debrid links), then simply by seeders. The
+ * viewer's quality settings are requirements, not a ranking: releases that miss one are
+ * kept, but move to a collapsed second tier.
  */
 const WEIGHT = {
   titleMatch: 1_000_000_000,
@@ -32,16 +25,6 @@ const WEIGHT = {
   episodePack: 200_000_000,
   language: 50_000_000,
   cached: 20_000_000,
-  quality: 1_000_000,
-  qualityStep: 100_000,
-  codec: 10_000,
-  codecStep: 2_000,
-  subs: 1_000,
-  audio: 600,
-  audioStep: 200,
-  format: 120,
-  formatStep: 40,
-  seeders: 10,
 } as const;
 
 /** Words that only ever appear on a video release, never on an album or book. */
@@ -103,8 +86,8 @@ function languageOk(r: Release, prefs: RankPrefs, q: RankQuery): boolean {
   return r.languages.some((l) => want.has(l));
 }
 
+/** Correctness only; quality settings never move a release here (see `misses`). */
 function scoreVideo(r: Release, prefs: RankPrefs, q: RankQuery, ep: EpisodeMatch): number {
-  const t = prefs.torrent;
   let s = 0;
 
   if (q.kind === 'movie' && q.year) {
@@ -119,35 +102,25 @@ function scoreVideo(r: Release, prefs: RankPrefs, q: RankQuery, ep: EpisodeMatch
 
   if (languageOk(r, prefs, q)) s += WEIGHT.language;
   if (r.cached) s += WEIGHT.cached;
-
-  if (q.kind === 'anime') {
-    const langs = prefs.anime.audioLanguages?.length ? prefs.anime.audioLanguages : ['ja'];
-    const wantsDub = langs.some((l) => l !== 'ja');
-    if (r.audioKind === 'dual') s += WEIGHT.subs;
-    else if (wantsDub && r.audioKind === 'dub') s += WEIGHT.subs;
-  }
-
-  const qIdx = r.quality ? t.preferredQualities.indexOf(r.quality) : -1;
-  if (qIdx >= 0) s += WEIGHT.quality - qIdx * WEIGHT.qualityStep;
-  else if (r.quality) s += WEIGHT.quality - t.preferredQualities.length * WEIGHT.qualityStep;
-
-  const cIdx = r.codec ? t.preferredCodecs.indexOf(r.codec) : -1;
-  if (cIdx >= 0) s += WEIGHT.codec - cIdx * WEIGHT.codecStep;
-
-  if (prefs.anime.preferEmbeddedSubs && r.hasSubs) s += WEIGHT.subs;
-
-  const aIdx = r.audio ? (t.preferredAudio ?? []).indexOf(r.audio) : -1;
-  if (aIdx >= 0) s += WEIGHT.audio - aIdx * WEIGHT.audioStep;
-  else if (r.audio && AUDIO_BROWSER_OK.has(r.audio)) s += WEIGHT.audio - WEIGHT.audioStep;
-  else if (r.audio && AUDIO_BROWSER_BAD.has(r.audio)) s -= WEIGHT.audio;
-
-  const sIdx = r.source ? (t.preferredSources ?? []).indexOf(r.source) : -1;
-  if (sIdx >= 0) s += WEIGHT.format - sIdx * WEIGHT.formatStep;
-  if (r.source === 'remux' && !t.preferRemux) s -= WEIGHT.format;
-  if (r.hdr) s += t.hdr ? WEIGHT.format : -WEIGHT.format;
-
-  s += Math.min(WEIGHT.seeders, Math.log2(r.seeders + 1) * 1.4);
   return s;
+}
+
+const FORMAT_LABEL: Record<string, string> = { remux: 'Remux', bluray: 'Blu-ray', webdl: 'WEB-DL', web: 'WEBRip', hdtv: 'HDTV', dvd: 'DVD' };
+
+/** The viewer's requirements this release doesn't meet. Anything the release doesn't state passes. */
+function missedRequirements(r: Release, prefs: RankPrefs, q: RankQuery, ep: EpisodeMatch): string[] {
+  const t = prefs.torrent;
+  const out: string[] = [];
+  if (r.quality && t.qualities.length && !t.qualities.includes(r.quality)) out.push(r.quality === '2160p' ? '4K' : r.quality);
+  if (r.codec && t.codecs.length && !t.codecs.includes(r.codec)) out.push(r.codec.toUpperCase());
+  if (r.audio && t.audioCodecs.length && !t.audioCodecs.includes(r.audio)) out.push(r.audio.toUpperCase());
+  if (r.source && t.formats.length && !t.formats.includes(r.source)) out.push(FORMAT_LABEL[r.source] ?? r.source);
+  if (r.hdr && !t.allowHdr) out.push('HDR');
+  if (!languageOk(r, prefs, q)) out.push('language');
+  // Size limits apply to the file we will actually play; a pack's total says little.
+  if (r.sizeBytes && !(ep === 'pack' && r.fileIdx == null) && r.sizeBytes / 1e9 > t.maxSizeGb) out.push('too large');
+  if (!r.cached && r.url === null && r.seeders < t.minSeeders) out.push('few seeders');
+  return out;
 }
 
 export interface RankResult {
@@ -199,13 +172,8 @@ export function rankReleases(input: Release[], prefs: RankPrefs, q: RankQuery): 
   pool = drop(pool, (r) => !is3d(`${r.title} ${r.fileName ?? ''}`));
   // Cams and telesyncs are never what anyone wants when anything else exists.
   pool = drop(pool, (r) => r.source !== 'cam');
-  pool = drop(pool, (r) => languageOk(r, prefs, q));
-  const maxRank = QUALITY_RANK[t.maxQuality] ?? 4;
-  pool = drop(pool, (r) => !r.quality || (QUALITY_RANK[r.quality] ?? 0) <= maxRank);
-  // Size limits apply to the file we will actually play; a pack's total says little.
-  pool = drop(pool, (r) => !r.sizeBytes || (matchOf.get(r) === 'pack' && r.fileIdx == null) || r.sizeBytes / 1e9 <= t.maxSizeGb);
   pool = drop(pool, (r) => !r.sizeBytes || r.sizeBytes / 1e9 >= 0.1);
-  pool = drop(pool, (r) => r.cached || r.url !== null || r.seeders >= t.minSeeders);
+  // A torrent nobody seeds won't play at all.
   pool = drop(pool, (r) => r.cached || r.url !== null || r.seeders >= 1);
 
   if (q.kind === 'anime') {
@@ -220,22 +188,22 @@ export function rankReleases(input: Release[], prefs: RankPrefs, q: RankQuery): 
     }
   }
 
-  for (const r of pool) r.score = scoreVideo(r, prefs, q, matchOf.get(r) ?? 'unknown');
-
-  // Preferred indexer/source (movies + shows): its releases come first and the
-  // rest are shown collapsed, unless it has nothing.
   const preferred = (t.preferredIndexer ?? '').trim().toLowerCase();
-  if (preferred && q.kind !== 'anime') {
-    const isPreferred = (r: Release) =>
-      r.indexer.toLowerCase().includes(preferred) ||
-      r.pluginName.toLowerCase().includes(preferred) ||
-      r.pluginId.toLowerCase() === preferred;
-    const hasPreferred = pool.some(isPreferred);
-    for (const r of pool) r.tier = hasPreferred && !isPreferred(r) ? 1 : 0;
+  const isPreferred = (r: Release) =>
+    r.indexer.toLowerCase().includes(preferred) || r.pluginName.toLowerCase().includes(preferred) || r.pluginId.toLowerCase() === preferred;
+  // Preferred indexer/source (movies + shows): the others are shown collapsed, unless it has nothing.
+  const narrow = Boolean(preferred) && q.kind !== 'anime' && pool.some(isPreferred);
+  for (const r of pool) {
+    const ep = matchOf.get(r) ?? 'unknown';
+    r.score = scoreVideo(r, prefs, q, ep);
+    r.misses = missedRequirements(r, prefs, q, ep);
+    r.tier = r.misses.length || (narrow && !isPreferred(r)) ? 1 : 0;
   }
 
+  // Ties on seeders: embedded subtitles (if wanted), then dual audio for anime.
+  const extra = (r: Release) => (prefs.anime.preferEmbeddedSubs && r.hasSubs ? 2 : 0) + (r.audioKind === 'dual' ? 1 : 0);
   return {
-    releases: pool.sort((a, b) => a.tier - b.tier || b.score - a.score || b.seeders - a.seeders).slice(0, 80),
+    releases: pool.sort((a, b) => a.tier - b.tier || b.score - a.score || b.seeders - a.seeders || extra(b) - extra(a)).slice(0, 80),
     noDub,
   };
 }

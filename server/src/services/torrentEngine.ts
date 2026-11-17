@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import WebTorrent from 'webtorrent';
+import type WebTorrent from 'webtorrent';
 import type { Torrent, TorrentFile } from 'webtorrent';
 import { config } from '../config.js';
 import { db } from '../db/index.js';
@@ -12,12 +12,14 @@ fs.mkdirSync(config.torrentDir, { recursive: true });
 
 // Leech-only client. `uploadLimit` caps total outgoing bytes as a safety net;
 // it cannot be 0 because handshakes and piece requests share the same pipe.
-// Created on first use, so a TORRENT_MODE=client server never opens a socket.
+// Created (and the library loaded, the slowest part of startup) on first use,
+// so a TORRENT_MODE=client server never opens a socket.
 let _client: WebTorrent | null = null;
-function torrents(): WebTorrent {
+async function torrents(): Promise<WebTorrent> {
   if (config.torrentMode === 'client') throw new Error('This server does not download torrents; your device streams them');
   if (!_client) {
-    _client = new WebTorrent({ uploadLimit: config.uploadLimitBps });
+    const { default: Client } = await import('webtorrent');
+    _client ??= new Client({ uploadLimit: config.uploadLimitBps });
     _client.on('error', (err) => console.error('[torrent] client error:', err));
   }
   return _client;
@@ -108,11 +110,9 @@ function findTorrent(infoHash: string): Torrent | undefined {
 /** Torrents owned by the server-library downloader (never evicted by the stream cache). */
 const downloadHashes = new Set<string>();
 
-export function engine(): { client: WebTorrent; find: (h: string) => Torrent | undefined; markDownload: (h: string, on: boolean) => void } {
+export function engine(): { client: () => Promise<WebTorrent>; find: (h: string) => Torrent | undefined; markDownload: (h: string, on: boolean) => void } {
   return {
-    get client() {
-      return torrents();
-    },
+    client: torrents,
     find: findTorrent,
     markDownload: (h, on) => (on ? downloadHashes.add(h) : downloadHashes.delete(h)),
   };
@@ -389,6 +389,7 @@ export async function addTorrent(
     }
   }
 
+  const client = await torrents();
   return new Promise<Prepared>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Timed out fetching torrent metadata')), 45_000);
     const done = (fn: () => void) => {
@@ -396,7 +397,7 @@ export async function addTorrent(
       fn();
     };
     try {
-      const torrent = torrents().add(source, TORRENT_OPTS, (t) => {
+      const torrent = client.add(source, TORRENT_OPTS, (t) => {
         done(() => {
           try {
             const prepared = prepareFrom(t, kind, input.fileIdx ?? null, input.episode ?? null);

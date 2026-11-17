@@ -9,7 +9,9 @@ import {
   ExternalLink,
   FolderPlus,
   HardDrive,
+  ListChecks,
   Lock,
+  MessagesSquare,
   MoreHorizontal,
   Play,
   Plus,
@@ -27,7 +29,7 @@ import { playIntent } from '../lib/intent';
 import { offlineSupported, useOffline } from '../lib/offline';
 import { useCollections, useContributions, useDetail, useEpisodes, useListToggle, useMediaProgress, usePrefs, useSession } from '../lib/queries';
 import { errorText, toast, useApp } from '../lib/store';
-import type { CatalogDetail, Episode, Progress } from '../lib/types';
+import type { CatalogDetail, Episode, Progress, TrackEntry, TrackStatus } from '../lib/types';
 import { PosterCard, Rail } from '../components/media';
 import { Trailer } from '../components/Trailer';
 import { Avatar, Badge, Button, Chip, Empty, Input, Menu, MenuItem, Modal, Segmented, Spinner } from '../components/ui';
@@ -40,6 +42,154 @@ function IconAction({ label, onClick, children, active }: { label: string; onCli
       </span>
       {label}
     </button>
+  );
+}
+
+const TRACK_STATUS: { value: TrackStatus; label: string }[] = [
+  { value: 'watching', label: 'Watching' },
+  { value: 'completed', label: 'Completed' },
+  { value: 'planning', label: 'Plan to watch' },
+  { value: 'paused', label: 'On hold' },
+  { value: 'dropped', label: 'Dropped' },
+];
+
+function TrackingModal({ detail, onClose }: { detail: CatalogDetail; onClose: () => void }) {
+  const qc = useQueryClient();
+  const entry = useQuery({ queryKey: ['track-entry', detail.id], queryFn: () => api.trackers.entry(detail.id) });
+  const current = entry.data?.anilist ?? entry.data?.mal ?? null;
+  const [status, setStatus] = useState<TrackStatus | ''>('');
+  const [progress, setProgress] = useState(0);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (!current) return;
+    setStatus(current.status ?? '');
+    setProgress(current.progress);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry.data]);
+  const total = entry.data?.episodes ?? detail.totalEpisodes ?? null;
+  const save = async () => {
+    setSaving(true);
+    try {
+      qc.setQueryData(['track-entry', detail.id], await api.trackers.setEntry(detail.id, { status: status || undefined, progress }));
+      toast('Your lists are updated', 'ok');
+      onClose();
+    } catch (e) {
+      toast(errorText(e), 'bad');
+    } finally {
+      setSaving(false);
+    }
+  };
+  const line = (site: string, e: TrackEntry | null | undefined) =>
+    e !== undefined && (
+      <div className="flex items-center justify-between gap-3 py-2 text-sm">
+        <span className="font-medium">{site}</span>
+        {e ? (
+          <a href={e.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-muted hover:text-fg">
+            {e.status ? TRACK_STATUS.find((s) => s.value === e.status)?.label : 'Not on your list'}
+            {e.progress ? ` · ${e.progress}${total ? ` / ${total}` : ''}` : ''}
+            <ExternalLink className="size-3.5" />
+          </a>
+        ) : (
+          <span className="text-faint">Not on MyAnimeList</span>
+        )}
+      </div>
+    );
+  return (
+    <Modal open onClose={onClose} title="Tracking">
+      <div className="px-6 pb-6">
+        {entry.isLoading ? (
+          <div className="grid h-24 place-items-center">
+            <Spinner />
+          </div>
+        ) : entry.error ? (
+          <p className="text-sm text-bad">{errorText(entry.error)}</p>
+        ) : (
+          <>
+            <div className="divide-y divide-line">
+              {line('AniList', entry.data?.anilist)}
+              {line('MyAnimeList', entry.data?.mal)}
+            </div>
+            <div className="mt-4 text-xs font-semibold tracking-wider text-faint uppercase">Status</div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {TRACK_STATUS.map((s) => (
+                <Chip key={s.value} active={status === s.value} onClick={() => setStatus(s.value)}>
+                  {s.label}
+                </Chip>
+              ))}
+            </div>
+            <div className="mt-4 text-xs font-semibold tracking-wider text-faint uppercase">Episodes watched</div>
+            <div className="mt-2 flex items-center gap-2">
+              <Button size="sm" onClick={() => setProgress((p) => Math.max(0, p - 1))} aria-label="One fewer">
+                −
+              </Button>
+              <Input
+                type="number"
+                min={0}
+                max={total ?? undefined}
+                value={progress}
+                onChange={(e) => setProgress(Math.max(0, Math.min(total ?? 100000, Number(e.target.value) || 0)))}
+                className="w-24 text-center"
+                aria-label="Episodes watched"
+              />
+              <Button size="sm" onClick={() => setProgress((p) => (total ? Math.min(total, p + 1) : p + 1))} aria-label="One more">
+                +
+              </Button>
+              {total && <span className="text-sm text-muted">of {total}</span>}
+            </div>
+            <div className="mt-6 flex justify-end">
+              <Button variant="white" loading={saving} onClick={save}>
+                Save to your lists
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+function TrackingAction({ detail }: { detail: CatalogDetail }) {
+  const trackers = useQuery({ queryKey: ['trackers'], queryFn: api.trackers.status, staleTime: 5 * 60_000 });
+  const [open, setOpen] = useState(false);
+  if (detail.mediaType !== 'anime' || !(trackers.data?.anilist.connected || trackers.data?.mal.connected)) return null;
+  return (
+    <>
+      <IconAction label="Tracking" onClick={() => setOpen(true)}>
+        <ListChecks className="size-5" />
+      </IconAction>
+      {open && <TrackingModal detail={detail} onClose={() => setOpen(false)} />}
+    </>
+  );
+}
+
+/** Episode discussion threads on AniList and MyAnimeList. */
+function DiscussModal({ detail, episode, onClose }: { detail: CatalogDetail; episode: number; onClose: () => void }) {
+  const q = useQuery({ queryKey: ['discussions', detail.id, episode], queryFn: () => api.trackers.discussions(detail.id, episode), staleTime: 30 * 60_000 });
+  return (
+    <Modal open onClose={onClose} title={`Episode ${episode} discussions`}>
+      <div className="space-y-1 px-4 pb-6">
+        {q.isLoading && (
+          <div className="grid h-20 place-items-center">
+            <Spinner />
+          </div>
+        )}
+        {q.error && <p className="px-2 text-sm text-bad">{errorText(q.error)}</p>}
+        {q.data?.map((d) => (
+          <a key={d.url} href={d.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-white/6">
+            <MessagesSquare className="size-5 shrink-0 text-accent" />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium">{d.title}</span>
+              <span className="block text-xs text-faint">
+                {d.site}
+                {d.comments != null ? ` · ${d.comments} comment${d.comments === 1 ? '' : 's'}` : ''}
+              </span>
+            </span>
+            <ExternalLink className="size-4 text-faint" />
+          </a>
+        ))}
+        {q.data && !q.data.length && <p className="px-2 text-sm text-muted">No discussion threads found for this episode yet.</p>}
+      </div>
+    </Modal>
   );
 }
 
@@ -284,6 +434,7 @@ function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; 
   const navigate = useNavigate();
   const qc = useQueryClient();
   const rowRef = useRef<HTMLDivElement>(null);
+  const [discuss, setDiscuss] = useState(false);
   useEffect(() => {
     if (focused) rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [focused]);
@@ -351,6 +502,19 @@ function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; 
               <HardDrive className="size-4" />
             </span>
           )}
+          {!upcoming && detail.mediaType === 'anime' && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setDiscuss(true);
+              }}
+              aria-label="Episode discussions"
+              title="Discussions on AniList and MyAnimeList"
+              className="rounded-full p-1 text-faint opacity-0 transition group-hover:opacity-100 hover:text-fg max-sm:opacity-100"
+            >
+              <MessagesSquare className="size-5" />
+            </button>
+          )}
           {!upcoming && (
             <button onClick={markWatched} aria-label={watched ? 'Mark unwatched' : 'Mark watched'} className={cls('rounded-full p-1 transition', watched ? 'text-ok' : 'text-faint opacity-0 group-hover:opacity-100 hover:text-fg max-sm:opacity-100')}>
               <CheckCircle2 className="size-5" />
@@ -359,6 +523,12 @@ function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; 
         </div>
         {ep.overview && <p className="mt-1 line-clamp-2 text-sm text-muted max-sm:hidden">{ep.overview}</p>}
       </div>
+      {discuss && (
+        // Portal clicks still bubble through React: keep them from opening the episode.
+        <div onClick={(e) => e.stopPropagation()}>
+          <DiscussModal detail={detail} episode={ep.episode} onClose={() => setDiscuss(false)} />
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -583,6 +753,7 @@ export function Title() {
               {list.has(detail.id) ? <Check className="size-5" /> : <Plus className="size-5" />}
             </IconAction>
             <CollectionsMenu detail={detail} />
+            <TrackingAction detail={detail} />
             <DownloadMenu detail={detail} intentSeason={intent?.season ?? null} intentEpisode={intent?.episode ?? null} />
             <IconAction label="Together" onClick={() => play(undefined, undefined, { room: 'new' })}>
               <Users className="size-5" />

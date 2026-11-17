@@ -42,7 +42,16 @@ const searchQuery = z.object({
   kind: kindSchema.optional(),
   title: z.string().max(300).optional(),
   creator: z.string().max(200).optional(),
+  /** Video codecs the viewer's device can't play ("h265"): they stop counting as a fit. */
+  unplayable: z.string().max(100).optional(),
 });
+
+function prefsFor(req: Request, unplayable?: string) {
+  const prefs = getPreferences(req.profile!.id);
+  const skip = new Set((unplayable ?? '').split(',').filter(Boolean));
+  const codecs = prefs.torrent.codecs.filter((c) => !skip.has(c));
+  return codecs.length && codecs.length !== prefs.torrent.codecs.length ? { ...prefs, torrent: { ...prefs.torrent, codecs } } : prefs;
+}
 
 /** Streams source results as each plugin answers (Server-Sent Events). */
 playRouter.get(
@@ -51,7 +60,7 @@ playRouter.get(
   asyncHandler(async (req, res) => {
     const q = parse(searchQuery, req.query);
     assertKindAllowed(req, q.kind ?? 'video');
-    const prefs = getPreferences(req.profile!.id);
+    const prefs = prefsFor(req, q.unplayable);
     const sse = openSse(req, res);
     try {
       const final = await searchSources(q, prefs, (s) => sse.send('update', publicSearch(s)));
@@ -70,7 +79,7 @@ playRouter.post(
   asyncHandler(async (req, res) => {
     const q = parse(searchQuery, req.body);
     assertKindAllowed(req, q.kind ?? 'video');
-    res.json(publicSearch(await searchSources(q, getPreferences(req.profile!.id))));
+    res.json(publicSearch(await searchSources(q, prefsFor(req, q.unplayable))));
   }),
 );
 

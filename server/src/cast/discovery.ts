@@ -5,9 +5,13 @@
  * them (the Windows app, or Docker with host networking).
  */
 import dgram from 'node:dgram';
+import net from 'node:net';
 import os from 'node:os';
+import tls from 'node:tls';
 import makeMdns from 'multicast-dns';
 import { config } from '../config.js';
+import { db } from '../db/index.js';
+import { HttpError } from '../lib/http.js';
 
 export interface CastDevice {
   id: string;
@@ -19,6 +23,8 @@ export interface CastDevice {
   /** DLNA: absolute SOAP control URLs. */
   avTransport?: string;
   renderingControl?: string;
+  /** Added by hand in the app (can be removed there). */
+  saved?: boolean;
 }
 
 /** IPv4 addresses of this machine's real network interfaces. */
@@ -192,20 +198,147 @@ async function scanDlna(ms: number): Promise<CastDevice[]> {
   return [...byId.values()];
 }
 
-// ---------------------------------------------------------------- manual devices (CAST_DEVICES)
+// ---------------------------------------------------------------- devices added by hand (CAST_DEVICES + the app)
+
+interface SavedDevice {
+  /** Same format as CAST_DEVICES: "chromecast:host[:port]" or "dlna:<description URL>". */
+  entry: string;
+  name: string;
+  id: string;
+  host: string;
+}
+
+const SAVED_KEY = 'cast.devices';
+
+function savedDevices(): SavedDevice[] {
+  const row = db.prepare('SELECT value FROM server_settings WHERE key = ?').get(SAVED_KEY) as { value: string } | undefined;
+  try {
+    return row ? (JSON.parse(row.value) as SavedDevice[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSaved(list: SavedDevice[]): void {
+  db.prepare(
+    `INSERT INTO server_settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')`,
+  ).run(SAVED_KEY, JSON.stringify(list));
+  last = null;
+}
+
+function chromecastEntry(value: string, name: string | null, saved: boolean): CastDevice {
+  const [host, port] = value.split(':');
+  return { id: `cc:manual:${host}`, name: name ?? `Chromecast (${host})`, kind: 'chromecast', host: host!, port: Number(port) || 8009, model: null, saved };
+}
 
 async function manualDevices(): Promise<CastDevice[]> {
+  const entries = [
+    ...config.castDevices.map((entry) => ({ entry, name: null as string | null, saved: false })),
+    ...savedDevices().map((s) => ({ ...s, saved: true })),
+  ];
   const out = await Promise.all(
-    config.castDevices.map(async (entry): Promise<CastDevice | null> => {
+    entries.map(async ({ entry, name, saved }): Promise<CastDevice | null> => {
       const [kind, ...rest] = entry.split(':');
       const value = rest.join(':');
-      if (kind === 'dlna') return describe(value);
-      if (kind !== 'chromecast' || !value) return null;
-      const [host, port] = value.split(':');
-      return { id: `cc:manual:${host}`, name: `Chromecast (${host})`, kind: 'chromecast', host: host!, port: Number(port) || 8009, model: null };
+      if (kind === 'dlna') {
+        const d = await describe(value);
+        return d ? { ...d, saved } : null;
+      }
+      return kind === 'chromecast' && value ? chromecastEntry(value, name, saved) : null;
     }),
   );
   return out.filter((d): d is CastDevice => d !== null);
+}
+
+/** Does a Chromecast answer on host:port? (The Cast protocol runs over TLS on 8009.) */
+function chromecastAnswers(host: string, port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = tls.connect({ host, port, rejectUnauthorized: false, timeout: 2500 });
+    const done = (ok: boolean) => {
+      sock.destroy();
+      resolve(ok);
+    };
+    sock.once('secureConnect', () => done(true));
+    sock.once('timeout', () => done(false));
+    sock.once('error', () => done(false));
+  });
+}
+
+async function chromecastName(host: string): Promise<string | null> {
+  try {
+    const res = await fetch(`http://${host}:8008/setup/eureka_info?params=name`, { signal: AbortSignal.timeout(2000) });
+    return res.ok ? (((await res.json()) as { name?: string }).name ?? null) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Asks one address directly for a media renderer (SSDP search sent to the device instead of the group). */
+function unicastSsdp(host: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const s = dgram.createSocket('udp4');
+    const msg = Buffer.from(['M-SEARCH * HTTP/1.1', `HOST: ${host}:1900`, 'MAN: "ssdp:discover"', 'MX: 1', `ST: ${RENDERER}`, '', ''].join('\r\n'));
+    const finish = (loc: string | null) => {
+      clearTimeout(timer);
+      s.close();
+      resolve(loc);
+    };
+    const timer = setTimeout(() => finish(null), 2500);
+    s.on('error', () => finish(null));
+    s.on('message', (buf) => {
+      const loc = /^location:\s*(\S+)/im.exec(buf.toString('utf8'))?.[1];
+      if (loc) finish(loc);
+    });
+    s.send(msg, 1900, host, (err) => err && finish(null));
+    setTimeout(() => s.send(msg, 1900, host, () => undefined), 700).unref();
+  });
+}
+
+const HOST = /^(?:\d{1,3}(?:\.\d{1,3}){3}|[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?)(?::(\d{1,5}))?$/i;
+
+/**
+ * Adds a TV the scan can't see. Accepts an address ("192.168.1.40", "tv.lan:8009") or a DLNA
+ * description URL, works out what answers there, and remembers it for everyone on this server.
+ */
+export async function addDevice(input: string): Promise<CastDevice> {
+  const value = input.trim();
+  let entry: string;
+  let device: CastDevice | null = null;
+  if (/^https?:\/\//i.test(value)) {
+    device = await describe(value);
+    entry = `dlna:${value}`;
+  } else {
+    const m = HOST.exec(value);
+    if (!m) throw new HttpError(400, 'Enter an IP address (like 192.168.1.40) or a DLNA description URL');
+    const host = m[1] ? value.slice(0, value.lastIndexOf(':')) : value;
+    const port = m[1] ? Number(m[1]) : 8009;
+    if (/^\d+(\.\d+){3}$/.test(host) && !net.isIP(host)) throw new HttpError(400, 'That is not a valid IP address');
+    if (await chromecastAnswers(host, port)) {
+      entry = `chromecast:${host}${port === 8009 ? '' : `:${port}`}`;
+      device = chromecastEntry(entry.slice('chromecast:'.length), await chromecastName(host), true);
+    } else {
+      const location = await unicastSsdp(host);
+      device = location ? await describe(location) : null;
+      entry = `dlna:${location ?? ''}`;
+    }
+  }
+  if (!device) throw new HttpError(404, `No Chromecast or DLNA TV answered at ${value}. Check that the TV is on and that this address is right.`);
+  const list = savedDevices().filter((s) => s.entry !== entry && s.id !== device.id);
+  writeSaved([...list, { entry, name: device.name, id: device.id, host: device.host }]);
+  return { ...device, saved: true };
+}
+
+export async function removeDevice(id: string): Promise<void> {
+  const list = savedDevices();
+  let keep = list.filter((s) => s.id !== id);
+  if (keep.length === list.length) {
+    // Listed under the id discovery gave it (e.g. a saved Chromecast that also announces itself).
+    const host = (await discoverDevices()).find((d) => d.id === id)?.host;
+    keep = host ? list.filter((s) => s.host !== host) : list;
+  }
+  if (keep.length === list.length) throw new HttpError(404, 'Only TVs added in the app can be removed here');
+  writeSaved(keep);
 }
 
 // ---------------------------------------------------------------- cache
@@ -221,10 +354,12 @@ export async function discoverDevices(force = false): Promise<CastDevice[]> {
       const [cc, dlna, manual] = await Promise.all([scanChromecasts(2500), scanDlna(2500), manualDevices()]);
       // A Google TV answers both; casting to it works best as a Chromecast.
       const ccHosts = new Set([...cc, ...manual.filter((d) => d.kind === 'chromecast')].map((d) => d.host));
+      const savedHosts = new Set(manual.filter((d) => d.saved).map((d) => d.host));
       const byId = new Map<string, CastDevice>();
       for (const d of [...manual, ...cc, ...dlna.filter((x) => !ccHosts.has(x.host))]) {
         if (d.kind === 'chromecast' && d.id.startsWith('cc:manual:') && cc.some((x) => x.host === d.host)) continue;
-        byId.set(d.id, d);
+        if (byId.has(d.id)) continue;
+        byId.set(d.id, savedHosts.has(d.host) ? { ...d, saved: true } : d);
       }
       const devices = [...byId.values()].sort((a, b) => a.name.localeCompare(b.name));
       last = { at: Date.now(), devices };

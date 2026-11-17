@@ -30,11 +30,20 @@ Nova is a self-hosted media app with three parts:
   - Stremio add-ons run remotely over HTTP. Nova plugins are bundles that run in a sandboxed worker with Node
     `--permission`, and the worker needs the **compiled** `dist/plugins/runtime/child.js`.
   - `plugins/sources.ts` aggregates and ranks releases (`core/ranking.ts`) and streams them over SSE.
+  - Ranking: torrent preferences are *requirements* (allowed qualities/codecs/audio/formats, HDR, size, seeders). Score
+    is correctness only (title/year, episode, language, debrid-cached); then seeders. Misfits get `tier: 1` and a
+    `misses` list. Old ranked keys are migrated by `migrateTorrentPrefs`.
 - **Streaming:**
   - Paths are `/stream/{t/<hash>/<idx>|l/<fileId>|u/<token>}`, plus `/audio` (AAC remux), `/transcode`,
     `/subs/:track` (Matroska subtitles as NDJSON, from `?from=`), `/subs/:track/vtt` and `/font/:index`.
   - Piped variants can't seek; the player reloads them with `start=` and keeps an offset.
-  - WebTorrent never seeds (`uploads: 0`).
+  - The `/audio` remux copies video, so a start between keyframes needs `delay_moov` (the moov then carries the edit
+    list that keeps picture and sound together). Don't drop it.
+  - WebTorrent never seeds (`uploads: 0`) and is imported lazily (it is the slowest module to load at startup).
+- **Library:** `LIBRARY_DIR` (downloads) plus "reading folders" (`library_sources`): read-only folders of books, comics
+  and manga whose files are stored as `@<source id>/<path>`; resolve paths with `libraryFilePath()`.
+- **Anime tracking** (`services/trackers.ts`): per-profile AniList (pasted token) and MyAnimeList (OAuth + PKCE, signed
+  `state`) accounts; finished anime episodes are pushed from the progress route. App credentials are integrations.
 - **Matroska:**
   - `server/src/media/matroska.ts` reads tracks, chapters and attachments from the header. It pulls subtitle blocks from
     the clusters near a time, using Cues.

@@ -65,7 +65,7 @@ async function waitHealthy(timeoutMs = 60_000) {
     } catch {
       /* not up yet */
     }
-    await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error('Nova did not start in time');
 }
@@ -99,7 +99,6 @@ async function onServerMessage(msg) {
 }
 
 async function startServer() {
-  port = await pickPort();
   const key = crypto.randomBytes(32).toString('hex');
   const logDir = path.join(dataRoot, 'logs');
   fs.mkdirSync(logDir, { recursive: true });
@@ -163,7 +162,24 @@ function icon() {
   return nativeImage.createFromPath(path.join(resources, 'icon.png'));
 }
 
-function createWindow() {
+/** Shown the moment the app opens, while the server starts behind it. */
+function splashUrl() {
+  let logo = '';
+  try {
+    logo = `data:image/png;base64,${fs.readFileSync(path.join(resources, 'icon.png')).toString('base64')}`;
+  } catch {
+    /* no icon staged */
+  }
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Nova</title><style>
+    html,body{margin:0;height:100%;background:#07070b;color:#a7a7b8;font:15px system-ui,sans-serif;overflow:hidden}
+    body{display:grid;place-items:center}div{text-align:center}
+    img{width:96px;height:96px;animation:p 1.6s ease-in-out infinite}
+    p{margin-top:22px;letter-spacing:.04em}@keyframes p{50%{opacity:.55;transform:scale(.96)}}
+  </style></head><body><div>${logo ? `<img src="${logo}" alt="">` : ''}<p>Starting Nova…</p></div></body></html>`;
+  return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function createWindow(splash = false) {
   win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -198,7 +214,7 @@ function createWindow() {
   win.on('closed', () => {
     win = null;
   });
-  void win.loadURL(`${origin}/`);
+  void win.loadURL(splash ? splashUrl() : `${origin}/`);
 }
 
 function ensureTray() {
@@ -235,8 +251,12 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     try {
+      port = await pickPort();
+      // Show something straight away; the server takes a moment to start.
+      createWindow(true);
       await startServer();
-      createWindow();
+      if (win) void win.loadURL(`http://127.0.0.1:${port}/`);
+      else createWindow();
       if (pairingsExist()) ensureTray();
     } catch (err) {
       dialog.showErrorBox('Nova could not start', String(err?.message ?? err));

@@ -183,7 +183,7 @@ export const api = {
   },
 
   play: {
-    sourcesUrl: (q: { mediaId: string; season?: number | null; episode?: number | null; kind?: T.SourceKind; title?: string; creator?: string }) =>
+    sourcesUrl: (q: { mediaId: string; season?: number | null; episode?: number | null; kind?: T.SourceKind; title?: string; creator?: string; unplayable?: string }) =>
       withProfile(`/api/play/sources${qs(q)}`),
     sourcesSync: (b: { mediaId: string; season?: number | null; episode?: number | null; kind?: T.SourceKind; title?: string; creator?: string }) =>
       post<T.SourceSearch>('/api/play/sources', b),
@@ -220,6 +220,17 @@ export const api = {
     },
   },
 
+  trackers: {
+    status: () => get<T.TrackerStatus>('/api/trackers'),
+    connectAnilist: (token: string) => post<T.TrackerStatus>('/api/trackers/anilist', { token }),
+    malAuthorize: () => get<{ url: string }>('/api/trackers/mal/authorize').then((r) => r.url),
+    disconnect: (service: 'anilist' | 'mal') => del(`/api/trackers/${service}`),
+    entry: (mediaId: string) => get<T.TrackEntries>(`/api/trackers/entry/${enc(mediaId)}`),
+    setEntry: (mediaId: string, b: { status?: T.TrackStatus; progress?: number }) => put<T.TrackEntries>(`/api/trackers/entry/${enc(mediaId)}`, b),
+    discussions: (mediaId: string, episode: number) =>
+      get<{ discussions: T.Discussion[] }>(`/api/trackers/discussions/${enc(mediaId)}`, { episode }).then((r) => r.discussions),
+  },
+
   server: {
     status: () => get<T.LibraryStatus>('/api/server-library/status'),
     items: (q: { kind?: string; status?: string; q?: string } = {}) =>
@@ -233,6 +244,10 @@ export const api = {
     refreshItem: (id: string) => post<{ item: T.LibraryItem }>(`/api/server-library/items/${id}/refresh`).then((r) => r.item),
     deleteItem: (id: string, files: boolean) => del(`/api/server-library/items/${id}`, { files: files ? '1' : undefined }),
     scan: () => post<{ result: { added: number; review: number; removed: number } }>('/api/server-library/scan').then((r) => r.result),
+    sources: () => get<{ sources: T.LibrarySource[] }>('/api/server-library/sources').then((r) => r.sources),
+    addSource: (b: { path: string; kind: T.LibrarySource['kind']; name?: string }) =>
+      post<{ source: T.LibrarySource; result: { added: number } }>('/api/server-library/sources', b),
+    removeSource: (id: string) => del(`/api/server-library/sources/${id}`),
     review: () => get<{ items: T.LibraryItem[] }>('/api/server-library/review').then((r) => r.items),
     candidates: (kind: string, q: string, year?: number | null) =>
       get<{ candidates: T.MatchCandidate[] }>('/api/server-library/candidates', { kind, q, year }).then((r) => r.candidates),

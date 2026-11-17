@@ -2,13 +2,14 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { History, Maximize, PictureInPicture2, Radio, Search, Star, Volume2, VolumeX } from 'lucide-react';
+import { History, Maximize, PictureInPicture2, Play, Radio, Search, Star, Volume2, VolumeX } from 'lucide-react';
 import { api } from '../lib/api';
 import { cls, fmtAirTime } from '../lib/format';
 import { useSession } from '../lib/queries';
 import { errorText, toast } from '../lib/store';
 import type { Channel, LivePlay, Programme } from '../lib/types';
-import { Chip, Empty, Spinner } from '../components/ui';
+import { Spotlight } from '../components/Hero';
+import { Button, Chip, Empty, Spinner } from '../components/ui';
 
 type Destroyable = { destroy: () => void };
 
@@ -131,6 +132,21 @@ export default function Live() {
     (c) => (activeGroup === 'all' || (activeGroup === 'favorites' ? c.favorite : groupOf(c) === activeGroup)) && (!q || c.name.toLowerCase().includes(q.toLowerCase())),
   );
   const onNow = (c: Channel) => (c.epgId ? byEpg.get(c.epgId)?.find((p) => p.start <= now && p.stop > now) : undefined);
+  // Something airing right now on a favourite (or any) channel, preferring programmes with artwork.
+  const spotlight = useMemo(() => {
+    const list = channels.data ?? [];
+    const t = Date.now() / 1000;
+    const favs = list.filter((c) => c.favorite);
+    const airing = (favs.length ? favs : list)
+      .slice(0, 300)
+      .map((c) => ({ c, p: c.epgId ? byEpg.get(c.epgId)?.find((x) => x.start <= t && x.stop > t) : undefined }))
+      .filter((x) => x.p);
+    const withArt = airing.filter((x) => x.p!.image);
+    const pool = withArt.length ? withArt : airing;
+    if (pool.length) return pool[Math.floor(Math.random() * pool.length)]!;
+    const first = favs[0] ?? list[0];
+    return first ? { c: first, p: undefined } : null;
+  }, [channels.data, byEpg]);
 
   const tune = async (c: Channel, catchup?: Programme) => {
     try {
@@ -171,8 +187,36 @@ export default function Live() {
   const hours = Array.from({ length: 9 }, (_, i) => windowStart + i * 3600);
 
   return (
-    <div className="pt-20">
-      <div ref={stage} className="grid gap-6 px-5 sm:px-10 lg:grid-cols-[minmax(0,1fr)_340px]">
+    <div className={spotlight ? '' : 'pt-20'}>
+      {spotlight && (
+        <Spotlight
+          backdrop={spotlight.p?.image}
+          art={spotlight.c.logo}
+          eyebrow={
+            <span className="flex items-center gap-2">
+              <span className="size-1.5 animate-pulse rounded-full bg-red-500" /> {spotlight.p ? 'On now' : 'Live'} · {spotlight.c.name}
+            </span>
+          }
+          title={spotlight.p?.title ?? spotlight.c.name}
+          meta={
+            spotlight.p ? (
+              <span>
+                {fmtAirTime(spotlight.p.start)} – {fmtAirTime(spotlight.p.stop)}
+                {spotlight.p.category ? ` · ${spotlight.p.category}` : ''}
+              </span>
+            ) : (
+              spotlight.c.group && <span>{spotlight.c.group}</span>
+            )
+          }
+          description={spotlight.p?.description ?? spotlight.p?.subtitle}
+          actions={
+            <Button variant="white" icon={<Play className="size-5 fill-current" />} onClick={() => tune(spotlight.c)}>
+              Watch now
+            </Button>
+          }
+        />
+      )}
+      <div ref={stage} className="relative z-10 grid scroll-mt-24 gap-6 px-5 sm:px-10 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="group relative aspect-video overflow-hidden rounded-3xl bg-black shadow-2xl ring-1 ring-white/10">
           {play ? <LiveVideo key={play.url} play={play} muted={muted} onError={(m) => toast(m, 'bad')} /> : <div className="grid size-full place-items-center"><Spinner /></div>}
           <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end gap-3 bg-gradient-to-t from-black/80 to-transparent p-4 opacity-0 transition-opacity group-hover:opacity-100">

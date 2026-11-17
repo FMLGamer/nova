@@ -15,7 +15,7 @@ import { signToken, verifyToken, randomToken } from '../lib/crypto.js';
 import { HttpError } from '../lib/http.js';
 import { asyncHandler } from '../lib/async.js';
 
-export const VERSION = '2.2.0';
+export const VERSION = '2.3.0';
 
 export const systemRouter = Router();
 
@@ -27,6 +27,7 @@ systemRouter.get('/config', (_req, res) => {
     torrentMode: config.torrentMode,
     enginePort: config.enginePort,
     desktopDownloadUrl: config.desktopDownloadUrl,
+    projectUrl: config.projectUrl,
   });
 });
 

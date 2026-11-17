@@ -2,9 +2,9 @@ import { motion } from 'motion/react';
 import { useState, type ReactNode } from 'react';
 import { NavLink, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, KeyRound, Link2, Palette, Play, Plus, Sparkles, Subtitles, Trash2, UserRound, House, Gauge, BookOpen } from 'lucide-react';
+import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, KeyRound, Link2, Palette, Play, Plus, Sparkles, Subtitles, Trash2, UserRound, House, Gauge, BookOpen, Info, ListChecks } from 'lucide-react';
 import { api } from '../lib/api';
-import { cls, LANGUAGES, relTime } from '../lib/format';
+import { cls, LANGUAGES, relTime, reportIssueUrl } from '../lib/format';
 import { useAppConfig, usePrefs, useProfile, useSavePrefs, useSession } from '../lib/queries';
 import { READING_FONTS } from '../lib/reading-fonts';
 import { errorText, toast } from '../lib/store';
@@ -24,6 +24,8 @@ const SECTIONS = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'assistant', label: 'Assistant', icon: Sparkles },
   { id: 'account', label: 'Account & sharing', icon: KeyRound },
+  { id: 'tracking', label: 'Anime tracking', icon: ListChecks },
+  { id: 'about', label: 'About Nova', icon: Info },
 ];
 
 function Group({ title, children, hint }: { title: string; children: ReactNode; hint?: ReactNode }) {
@@ -43,7 +45,6 @@ function MultiChips({ value, options, onChange }: { value: string[]; options: { 
         const on = value.includes(o.value);
         return (
           <Chip key={o.value} active={on} onClick={() => onChange(on ? value.filter((x) => x !== o.value) : [...value, o.value])}>
-            {on && value.length > 1 && <span className="text-[10px] opacity-60">{value.indexOf(o.value) + 1}</span>}
             {o.label}
           </Chip>
         );
@@ -239,13 +240,14 @@ function SubtitlesSection({ p, set }: { p: Preferences; set: (x: object) => void
 
 const QUALITIES = ['2160p', '1080p', '720p', '480p'].map((q) => ({ value: q, label: q === '2160p' ? '4K' : q }));
 const CODECS = ['h264', 'h265', 'av1'].map((v) => ({ value: v, label: v.toUpperCase() }));
-const AUDIO = ['aac', 'opus', 'mp3', 'eac3', 'ac3', 'dts', 'truehd'].map((v) => ({ value: v, label: v.toUpperCase() }));
+const AUDIO = ['aac', 'opus', 'mp3', 'eac3', 'ac3', 'dts', 'truehd', 'flac'].map((v) => ({ value: v, label: v.toUpperCase() }));
 const SOURCES = [
   { value: 'remux', label: 'Remux' },
   { value: 'bluray', label: 'Blu-ray' },
   { value: 'webdl', label: 'WEB-DL' },
   { value: 'web', label: 'WEBRip' },
   { value: 'hdtv', label: 'HDTV' },
+  { value: 'dvd', label: 'DVD' },
 ];
 
 function SourcesSection({ p, set }: { p: Preferences; set: (x: object) => void }) {
@@ -254,21 +256,21 @@ function SourcesSection({ p, set }: { p: Preferences; set: (x: object) => void }
   const animeAudio = dub.length === 1 && dub[0] === 'ja' ? 'sub' : dub[0] === 'ja' ? 'dual' : 'dub';
   return (
     <>
-      <Group title="What a good release looks like" hint="Sources are ranked with these, best first. Order matters — tap in the order you prefer.">
+      <Group
+        title="Which sources are OK"
+        hint="Pick everything you're happy with. Of the sources that fit, the one with the most seeders plays. Sources that don't fit are still listed under More sources."
+      >
         <Row stack label="Resolution">
-          <MultiChips value={t.preferredQualities} options={QUALITIES} onChange={(v) => set({ torrent: { preferredQualities: v } })} />
+          <MultiChips value={t.qualities} options={QUALITIES} onChange={(v) => set({ torrent: { qualities: v } })} />
         </Row>
-        <Row label="Never above">
-          <Segmented size="sm" value={t.maxQuality} onChange={(v) => set({ torrent: { maxQuality: v } })} options={QUALITIES} />
+        <Row stack label="Video codecs" hint="H.264 plays everywhere; H.265 and AV1 are smaller but need a recent device.">
+          <MultiChips value={t.codecs} options={CODECS} onChange={(v) => set({ torrent: { codecs: v } })} />
         </Row>
-        <Row stack label="Video codecs" hint="H.264 plays everywhere; H.265 saves space but needs hardware support.">
-          <MultiChips value={t.preferredCodecs} options={CODECS} onChange={(v) => set({ torrent: { preferredCodecs: v } })} />
+        <Row stack label="Audio" hint="Nova converts audio browsers can't play, so all of these work.">
+          <MultiChips value={t.audioCodecs} options={AUDIO} onChange={(v) => set({ torrent: { audioCodecs: v } })} />
         </Row>
-        <Row stack label="Audio" hint="Browser-friendly formats first means less work for the server.">
-          <MultiChips value={t.preferredAudio} options={AUDIO} onChange={(v) => set({ torrent: { preferredAudio: v } })} />
-        </Row>
-        <Row stack label="Release type">
-          <MultiChips value={t.preferredSources} options={SOURCES} onChange={(v) => set({ torrent: { preferredSources: v } })} />
+        <Row stack label="Release type" hint="Remuxes are untouched disc copies: the best picture, but very large files.">
+          <MultiChips value={t.formats} options={SOURCES} onChange={(v) => set({ torrent: { formats: v } })} />
         </Row>
         <Row stack label="Audio languages">
           <MultiChips value={t.preferredLanguages} options={LANGUAGES.slice(0, 12).map((l) => ({ value: l.code, label: l.name }))} onChange={(v) => set({ torrent: { preferredLanguages: v } })} />
@@ -279,11 +281,8 @@ function SourcesSection({ p, set }: { p: Preferences; set: (x: object) => void }
         <Row label="Fewest seeders" stack>
           <Slider value={t.minSeeders} min={0} max={50} onChange={(v) => set({ torrent: { minSeeders: v } })} format={(v) => String(v)} />
         </Row>
-        <Row label="Prefer HDR">
-          <Switch checked={t.hdr} onChange={(v) => set({ torrent: { hdr: v } })} />
-        </Row>
-        <Row label="Prefer remuxes" hint="Untouched disc quality; very large files.">
-          <Switch checked={t.preferRemux} onChange={(v) => set({ torrent: { preferRemux: v } })} />
+        <Row label="HDR is OK" hint="HDR looks washed out on screens and browsers that can't show it.">
+          <Switch checked={t.allowHdr} onChange={(v) => set({ torrent: { allowHdr: v } })} />
         </Row>
       </Group>
       <Group title="Anime">
@@ -649,6 +648,134 @@ function AccountSection() {
   );
 }
 
+function TrackerAccountRow({ name, user, avatar, onDisconnect }: { name: string; user: string | null; avatar: string | null; onDisconnect: () => void }) {
+  return (
+    <Row
+      label={
+        <span className="flex items-center gap-3">
+          {avatar ? <img src={avatar} alt="" className="size-8 rounded-full object-cover" /> : null}
+          <span>
+            {user}
+            <span className="block text-xs font-normal text-faint">Connected to {name}</span>
+          </span>
+        </span>
+      }
+    >
+      <Button size="sm" variant="ghost" onClick={onDisconnect}>
+        Disconnect
+      </Button>
+    </Row>
+  );
+}
+
+function TrackingSection() {
+  const qc = useQueryClient();
+  const status = useQuery({ queryKey: ['trackers'], queryFn: api.trackers.status, refetchOnWindowFocus: true });
+  const [token, setToken] = useState('');
+  const [busy, setBusy] = useState(false);
+  const s = status.data;
+  if (!s) return null;
+  const refresh = () => qc.invalidateQueries({ queryKey: ['trackers'] });
+  const disconnect = async (service: 'anilist' | 'mal') => {
+    await api.trackers.disconnect(service).catch((e) => toast(errorText(e), 'bad'));
+    refresh();
+  };
+  const connectAnilist = async () => {
+    setBusy(true);
+    try {
+      await api.trackers.connectAnilist(token);
+      setToken('');
+      toast('AniList connected', 'ok');
+      refresh();
+    } catch (e) {
+      toast(errorText(e), 'bad');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const anilistDev = 'https://anilist.co/settings/developer';
+  return (
+    <>
+      <Group title="AniList" hint="Episodes you finish in Nova are marked on your AniList, and you can change a show's status from its page.">
+        {s.anilist.connected ? (
+          <TrackerAccountRow name="AniList" user={s.anilist.user} avatar={s.anilist.avatar} onDisconnect={() => void disconnect('anilist')} />
+        ) : (
+          <div className="space-y-3 py-3 text-sm">
+            {s.anilistAuthorizeUrl ? (
+              <p className="text-muted">
+                1.{' '}
+                <a href={s.anilistAuthorizeUrl} target="_blank" rel="noreferrer" className="font-semibold text-fg underline">
+                  Open AniList
+                </a>{' '}
+                and approve Nova. 2. Copy the token AniList shows you and paste it here.
+              </p>
+            ) : (
+              <p className="text-muted">
+                Create a free API client at{' '}
+                <a href={anilistDev} target="_blank" rel="noreferrer" className="text-fg underline">
+                  anilist.co/settings/developer
+                </a>{' '}
+                with redirect URL <code className="rounded bg-white/8 px-1">https://anilist.co/api/v2/oauth/pin</code>, open{' '}
+                <code className="rounded bg-white/8 px-1 break-all">https://anilist.co/api/v2/oauth/authorize?client_id=YOUR_ID&amp;response_type=token</code>, approve, and paste the token
+                it shows here. (A server admin can add the client ID once under Server → Overview → Integrations to make this one click.)
+              </p>
+            )}
+            <div className="flex gap-2">
+              <Input type="password" autoComplete="off" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Paste your AniList token" className="flex-1" />
+              <Button variant="white" loading={busy} disabled={token.trim().length < 20} onClick={connectAnilist}>
+                Connect
+              </Button>
+            </div>
+          </div>
+        )}
+      </Group>
+      <Group title="MyAnimeList" hint="The same for MyAnimeList: finished episodes update your list.">
+        {s.mal.connected ? (
+          <TrackerAccountRow name="MyAnimeList" user={s.mal.user} avatar={s.mal.avatar} onDisconnect={() => void disconnect('mal')} />
+        ) : s.mal.configured ? (
+          <Row label="Connect your account" hint="Opens MyAnimeList to sign in. Come back here when it says you're connected.">
+            <Button
+              variant="white"
+              size="sm"
+              onClick={async () => {
+                try {
+                  window.open(await api.trackers.malAuthorize(), '_blank', 'noopener');
+                } catch (e) {
+                  toast(errorText(e), 'bad');
+                }
+              }}
+            >
+              Connect
+            </Button>
+          </Row>
+        ) : (
+          <p className="py-3 text-sm text-muted">A server admin can turn on MyAnimeList under Server → Overview → Integrations.</p>
+        )}
+      </Group>
+    </>
+  );
+}
+
+function AboutSection() {
+  const { data: cfg } = useAppConfig();
+  if (!cfg) return null;
+  const link = (href: string, label: string) => (
+    <a href={href} target="_blank" rel="noreferrer">
+      <Button size="sm">{label}</Button>
+    </a>
+  );
+  return (
+    <Group title="About Nova" hint="Nova is open source. Found a bug or missing something? Let us know.">
+      <Row label="Version">{cfg.version}</Row>
+      <Row label="Running as">{cfg.mode === 'desktop' ? 'Windows app' : 'Server'}</Row>
+      <Row label="Report a problem" hint="Opens a new issue with your Nova version and browser already filled in.">
+        {link(reportIssueUrl(cfg), 'Report')}
+      </Row>
+      <Row label="Source code & releases">{link(cfg.projectUrl, 'Open')}</Row>
+    </Group>
+  );
+}
+
 export default function Settings() {
   const { section = '' } = useParams();
   const { data: prefs } = usePrefs();
@@ -676,6 +803,8 @@ export default function Settings() {
         <motion.div key={active.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl pb-10">
           {active.id === '' && <ProfileSection />}
           {active.id === 'account' && <AccountSection />}
+          {active.id === 'about' && <AboutSection />}
+          {active.id === 'tracking' && <TrackingSection />}
           {active.id === 'assistant' && <AssistantSection />}
           {prefs && active.id === 'playback' && <PlaybackSection p={prefs} set={set} />}
           {prefs && active.id === 'subtitles' && <SubtitlesSection p={prefs} set={set} />}

@@ -4,6 +4,7 @@ import { requireAuth, requireProfile } from '../auth/middleware.js';
 import { asyncHandler } from '../lib/async.js';
 import { parse } from '../lib/http.js';
 import { detailFor } from '../services/catalog.js';
+import { trackWatched } from '../services/trackers.js';
 import {
   addToList,
   continueWatching,
@@ -73,6 +74,8 @@ progressRouter.get('/:itemKey', (req, res) => {
 progressRouter.put('/', (req, res) => {
   const body = parse(progressSchema, req.body);
   res.json({ progress: upsertProgress(req.profile!.id, body) });
+  // Connected AniList / MyAnimeList lists follow along (in the background; never blocks the save).
+  if (body.finished && body.mediaType === 'anime' && body.episode != null) void trackWatched(req.profile!.id, body.mediaId, body.episode).catch(() => undefined);
 });
 
 progressRouter.delete('/:itemKey', (req, res) => {

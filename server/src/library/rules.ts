@@ -2,7 +2,7 @@ import { db } from '../db/index.js';
 import { newId } from '../lib/crypto.js';
 import { HttpError } from '../lib/http.js';
 import { bestRelease } from '../plugins/sources.js';
-import { DEFAULT_PREFERENCES, type Preferences } from '../services/profiles.js';
+import { DEFAULT_PREFERENCES, migrateTorrentPrefs, type Preferences } from '../services/profiles.js';
 import { requestDownload } from './downloads.js';
 import { airedEpisodes } from './followed.js';
 import { libraryEnabled } from './library.js';
@@ -30,7 +30,7 @@ function rowToProfile(r: ProfileRow): QualityProfile {
     id: r.id,
     name: r.name,
     isDefault: r.is_default === 1,
-    torrent: { ...DEFAULT_PREFERENCES.torrent, ...(data.torrent ?? {}) },
+    torrent: { ...DEFAULT_PREFERENCES.torrent, ...migrateTorrentPrefs(data.torrent as Record<string, unknown> | undefined, true) },
     anime: { audioLanguages: ['ja'], preferEmbeddedSubs: true, ...(data.anime ?? {}) },
   };
 }
@@ -40,9 +40,9 @@ export function listQualityProfiles(): QualityProfile[] {
   if (rows.length) return rows.map(rowToProfile);
   // Seed sensible presets on first use.
   const seeds: [string, Partial<Preferences['torrent']>, boolean][] = [
-    ['1080p (balanced)', { preferredQualities: ['1080p', '720p'], maxQuality: '1080p', maxSizeGb: 6 }, true],
-    ['4K HDR', { preferredQualities: ['2160p', '1080p'], maxQuality: '2160p', maxSizeGb: 40, hdr: true, preferredCodecs: ['h265', 'h264'] }, false],
-    ['Space saver 720p', { preferredQualities: ['720p', '1080p'], maxQuality: '1080p', maxSizeGb: 2, preferredCodecs: ['h265', 'h264'] }, false],
+    ['1080p (balanced)', { qualities: ['1080p', '720p'], maxSizeGb: 6 }, true],
+    ['4K HDR', { qualities: ['2160p', '1080p'], maxSizeGb: 40, allowHdr: true, formats: ['remux', 'bluray', 'webdl', 'web'] }, false],
+    ['Space saver 720p', { qualities: ['720p'], maxSizeGb: 2 }, false],
   ];
   for (const [name, torrent, def] of seeds) {
     db.prepare('INSERT INTO quality_profiles (id, name, data, is_default) VALUES (?, ?, ?, ?)').run(

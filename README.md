@@ -17,18 +17,20 @@ Nova ships no content sources of its own. Everything that finds or fetches media
 
 | | What it is | Who streams torrents |
 |---|---|---|
-| **Nova for Windows** | Installer or portable `.exe`. Everything runs on your PC, with no account or setup. | Your PC |
+| **Nova for Windows** | Installer, `.zip` or portable `.exe`. Everything runs on your PC, with no account or setup. | Your PC |
 | **Docker: `nova:latest`** | Multi-user server with invite-only accounts. | The server |
 | **Docker: `nova:client`** | Same server, but it never joins a torrent swarm. | Each viewer's device, through Nova for Windows or the browser |
 
 ### Nova for Windows
 
-1. Download `Nova-Setup-x.y.z.exe` (installer) or `Nova-Portable-x.y.z.exe` (no install) from
-   [Releases](https://github.com/FMLGamer/nova/releases).
+1. From [Releases](https://github.com/FMLGamer/nova/releases), download one of:
+   - `Nova-Setup-x.y.z.exe`: the installer.
+   - `Nova-x.y.z-win.zip`: unzip anywhere and run `Nova.exe`.
+   - `Nova-Portable-x.y.z.exe`: a single file, but it unpacks itself on every start, so it opens slower than the other two.
 2. Open it.
 3. Go to **Server → Plugins** to add sources.
 
-The installed app keeps its data in `%APPDATA%\Nova`. The portable app keeps it in a `Nova Data` folder next to the `.exe`.
+The installed and zip versions keep their data in `%APPDATA%\Nova`. The portable app keeps it in a `Nova Data` folder next to the `.exe`.
 Media you keep goes to `Videos\Nova`.
 
 The app also works as a local streaming engine for `nova:client` servers. When such a site wants to play a torrent, Nova asks
@@ -80,6 +82,8 @@ priority:
 | `SESSION_SECRET` | generated in `/data` | Signing key for sessions |
 | `TMDB_API_KEY` | none | Optional TMDB metadata (without it, Cinemeta is used). Anime (AniList) needs no key. |
 | `OPENSUBTITLES_API_KEY`, `_USERNAME`, `_PASSWORD` | none | In-player subtitle search |
+| `ANILIST_CLIENT_ID` | none | One-click AniList tracking (client with redirect `https://anilist.co/api/v2/oauth/pin`) |
+| `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET` | none | MyAnimeList tracking (app redirect `<your Nova URL>/api/trackers/mal/callback`) |
 | `PLUGINS_AUTOINSTALL` | none | Manifest URLs installed and approved on boot |
 | `PLUGIN_<ID>_<KEY>` | none | Plugin config, e.g. `PLUGIN_NOVA_PROWLARR_URL`, `PLUGIN_NOVA_PROWLARR_APIKEY` |
 | `PLUGIN_REGISTRIES` | nova-plugins registry | Registries offered in the plugin browser |
@@ -88,14 +92,17 @@ priority:
 | `MAX_TRANSCODES` | `1` | Concurrent full transcodes |
 | `HW_ACCEL` | none | `vaapi` for Intel/AMD hardware transcoding (pass `/dev/dri`) |
 | `COOKIE_SECURE` | follows HTTPS | Force `true`/`false` |
-| `CAST_DEVICES` | none | TVs to offer when discovery can't see them, e.g. `chromecast:192.168.1.40,dlna:http://192.168.1.41:9197/dmr` |
+| `CAST_DEVICES` | none | TVs to offer when discovery can't see them, e.g. `chromecast:192.168.1.40,dlna:http://192.168.1.41:9197/dmr` (admins can also add them by address in the player's Cast menu) |
 | `CAST_PORT` | `11472` (Windows app) | LAN port the Windows app serves cast streams on |
+| `PROJECT_URL` | this repository | Where "Report a problem" and update links point (for forks) |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | none | Built-in local assistant model (needs tool calling) |
 
 Back up `/data`. Everything else can be rebuilt.
 
 ## Highlights
 
+- **Sources:** you tick which resolutions, codecs, audio and release types are fine (Settings → Sources & quality).
+  Of the sources that fit, the best-seeded one plays; the rest stay one click away.
 - **Playback:**
   - Custom player with Anime4K, CAS and deband shaders, picture-in-picture and a sleep timer.
   - Audio formats browsers can't play (E-AC-3, DTS, TrueHD) are converted on the fly.
@@ -112,9 +119,12 @@ Back up `/data`. Everything else can be rebuilt.
     Edge can also use their own Cast menu.
   - Text subtitles go to the TV as subtitles. ASS/SSA subtitles are burned into the picture while casting (one live
     encode with the file's own fonts, on the GPU when there is one).
-  - A server in a container only sees TVs with host networking, or the ones listed in `CAST_DEVICES`.
+  - A server in a container only sees TVs with host networking, or the ones listed in `CAST_DEVICES` or added by address.
 - **Reading:** a comic reader (single page, spread or scroll, in either direction) and an EPUB/PDF reader with highlights,
-  notes and dyslexia-friendly typefaces.
+  notes and dyslexia-friendly typefaces. Point Nova at existing folders of e-books, comics and manga under
+  **Server → Library → Reading folders**; it reads them in place and never changes them.
+- **Anime tracking:** connect AniList and/or MyAnimeList per profile (Settings → Anime tracking). Finished episodes update
+  your list, the status can be changed from a show's page, and every episode links to its discussion threads.
 - **Live TV:** M3U, Xtream, Stalker/Ministra and HDHomeRun inputs, the iptv-org directory and an XMLTV guide.
 - **People:** invite-only accounts, profiles, expiring guest links, and watch rooms with chat.
 - **Plugins:**
@@ -130,8 +140,8 @@ DEV_AUTH=1 node server/dist/index.js     # API on :3000; DEV_AUTH signs you in a
 npm run dev                              # UI on :5173 (proxies /api, /stream, /live, /ws)
 ```
 
-To build the Windows app (on Windows), run `npm --prefix desktop install && npm --prefix desktop run dist`. The installer and
-portable `.exe` end up in `desktop/release/`.
+To build the Windows app (on Windows), run `npm --prefix desktop install && npm --prefix desktop run dist`. The installer,
+zip and portable `.exe` end up in `desktop/release/`.
 
 The project layout:
 

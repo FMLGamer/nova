@@ -8,6 +8,7 @@ import { useMyList, usePrefs, useSavePrefs, useSummary } from '../lib/queries';
 import type { AiringEntry } from '../lib/types';
 import { PosterCard, PosterGrid, Rail, RailSkeleton } from '../components/media';
 import { Chip, Segmented, Spinner } from '../components/ui';
+import { HERO_HEIGHT, Hero, pickHero } from '../components/Hero';
 import { PageHeader } from './Browse';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -262,27 +263,32 @@ function BrowseAnime() {
 export default function Anime() {
   const recent = useQuery({ queryKey: ['anime-recent'], queryFn: api.catalog.animeRecent, staleTime: 15 * 60_000 });
   const seasonal = useQuery({ queryKey: ['anime-row', 'seasonal'], queryFn: () => api.catalog.anime('seasonal'), staleTime: 30 * 60_000 });
+  const featured = useMemo(() => pickHero(seasonal.data, 20), [seasonal.data]);
   useEffect(() => {
     if (location.hash === '#schedule') window.setTimeout(() => document.getElementById('schedule')?.scrollIntoView({ behavior: 'smooth' }), 400);
   }, []);
 
   return (
     <div className="space-y-14">
-      <PageHeader
-        title="Anime"
-        kicker="Simulcasts & seasons"
-        tone="#ff5c7a"
-        subtitle="Simulcasts the moment they land, the whole season's schedule, and every classic worth starting."
-      >
-        <div className="flex gap-2">
-          <a href="#schedule" className="glass inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm hover:bg-white/12">
-            <Clock className="size-4" /> Schedule
-          </a>
-          <a href="#browse" className="glass inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm hover:bg-white/12">
-            <Rows3 className="size-4" /> Browse all
-          </a>
-        </div>
-      </PageHeader>
+      <div>
+        {featured ? <Hero item={featured} compact eyebrow="This season" /> : seasonal.isLoading && <div className={`${HERO_HEIGHT.compact} skeleton`} />}
+        <PageHeader
+          flush={Boolean(featured) || seasonal.isLoading}
+          title="Anime"
+          kicker="Simulcasts & seasons"
+          tone="#ff5c7a"
+          subtitle="Simulcasts the moment they land, the whole season's schedule, and every classic worth starting."
+        >
+          <div className="flex gap-2">
+            <a href="#schedule" className="glass inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm hover:bg-white/12">
+              <Clock className="size-4" /> Schedule
+            </a>
+            <a href="#browse" className="glass inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm hover:bg-white/12">
+              <Rows3 className="size-4" /> Browse all
+            </a>
+          </div>
+        </PageHeader>
+      </div>
 
       {recent.isLoading ? (
         <RailSkeleton />

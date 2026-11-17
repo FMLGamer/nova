@@ -1,6 +1,6 @@
 import path from 'node:path';
 
-export type LibraryKind = 'movie' | 'tv' | 'anime' | 'book' | 'comic' | 'music';
+export type LibraryKind = 'movie' | 'tv' | 'anime' | 'book' | 'comic' | 'manga' | 'music';
 
 export const VIDEO_EXT = /\.(mkv|mp4|m4v|webm|avi|mov|ts)$/i;
 export const AUDIO_EXT = /\.(mp3|flac|m4a|m4b|aac|ogg|opus|wav)$/i;
@@ -105,6 +105,8 @@ export function organizedPath(opts: {
       return path.join('Books', safe(opts.creator ?? 'Unknown'), `${t}${ext}`);
     case 'comic':
       return path.join('Comics', t, safe(path.basename(opts.fileName)));
+    case 'manga':
+      return path.join('Manga', t, safe(path.basename(opts.fileName)));
     case 'music':
       return path.join('Music', safe(opts.creator ?? 'Unknown'), t, safe(path.basename(opts.fileName)));
   }
@@ -117,7 +119,8 @@ export function kindFromPath(rel: string): LibraryKind | null {
   if (/^(shows?|tv|series)$/.test(top)) return 'tv';
   if (/^anime$/.test(top)) return 'anime';
   if (/^(books?|ebooks?|audiobooks?)$/.test(top)) return 'book';
-  if (/^(comics?|manga)$/.test(top)) return 'comic';
+  if (/^comics?$/.test(top)) return 'comic';
+  if (/^manga$/.test(top)) return 'manga';
   if (/^music$/.test(top)) return 'music';
   return null;
 }

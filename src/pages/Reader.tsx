@@ -227,7 +227,14 @@ export default function Reader() {
     };
   }, [content.data]);
 
-  const kind: ReadingKind = content.data?.format === 'pdf' ? 'pdf' : content.data?.format === 'comic' ? (source?.type === 'plugin' ? 'manga' : 'comic') : 'book';
+  const kind: ReadingKind =
+    content.data?.format === 'pdf'
+      ? 'pdf'
+      : content.data?.format === 'comic'
+        ? source?.type === 'plugin' || (source?.type === 'library' && source.manga)
+          ? 'manga'
+          : 'comic'
+        : 'book';
   const onLocation = useCallback(
     (locator: string, percent: number, label?: string) => {
       setLoc({ locator, percent, label });

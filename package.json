@@ -1,7 +1,7 @@
 {
   "name": "nova",
   "private": true,
-  "version": "2.2.0",
+  "version": "2.3.0",
   "type": "module",
   "license": "MIT",
   "description": "Nova — movies, shows, anime, live TV and reading in one self-hosted app, extensible with Stremio-compatible plugins.",

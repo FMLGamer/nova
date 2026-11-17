@@ -192,6 +192,11 @@ function runFfmpeg(req: Request, res: Response, args: string[], stdin: Readable 
 }
 
 const FMP4 = ['-movflags', 'frag_keyframe+empty_moov+default_base_moof', '-f', 'mp4', 'pipe:1'];
+// A stream copy that starts between keyframes begins with video from before the seek point; only a
+// moov written after the first fragment (delay_moov) carries the edit list that lines it up with the
+// audio. Without it the picture ran up to a second off the sound. (The browser waits for that first
+// fragment anyway, so it costs no start-up time.)
+const FMP4_COPY = ['-movflags', 'frag_keyframe+empty_moov+default_base_moof+delay_moov', '-f', 'mp4', 'pipe:1'];
 
 async function audioFix(req: Request, res: Response, ctx: StreamCtx): Promise<void> {
   const track = Number(req.query.track) || 0;
@@ -213,7 +218,7 @@ async function audioFix(req: Request, res: Response, ctx: StreamCtx): Promise<vo
       '-c:a', 'aac',
       '-b:a', '192k',
       '-ac', '2',
-      ...FMP4,
+      ...FMP4_COPY,
     ],
     input.stdin,
   );

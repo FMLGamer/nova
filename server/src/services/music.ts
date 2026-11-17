@@ -1,3 +1,4 @@
+import { config } from '../config.js';
 import { cached } from '../lib/cache.js';
 import { fetchJson } from '../lib/upstream.js';
 
@@ -8,7 +9,7 @@ import { fetchJson } from '../lib/upstream.js';
  */
 const MB = 'https://musicbrainz.org/ws/2';
 const CAA = 'https://coverartarchive.org';
-const UA = 'Nova/2 ( https://github.com/FMLGamer/nova )';
+const UA = `Nova/2 ( ${config.projectUrl} )`;
 const DAY = 24 * 60 * 60 * 1000;
 
 const headers = { 'User-Agent': UA, Accept: 'application/json' };

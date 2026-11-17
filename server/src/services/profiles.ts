@@ -11,19 +11,18 @@ import type { ProfileRow, ProfileDTO } from '../types.js';
  */
 export const DEFAULT_PREFERENCES = {
   torrent: {
-    preferredQualities: ['1080p', '720p'] as string[],
-    maxQuality: '1080p',
-    preferredCodecs: ['h264'] as string[], // browser-friendly first
-    // Audio codecs to favour. AAC/Opus/MP3 decode natively in every browser;
-    // AC3/DTS/TrueHD play silently unless transcoded.
-    preferredAudio: ['aac', 'opus', 'mp3'] as string[],
-    // Release formats, best-first (remux | bluray | webdl | web | hdtv | dvd).
-    preferredSources: ['webdl', 'bluray'] as string[],
+    // Requirements, not a ranking: a source has to fit all of them (anything a release doesn't
+    // state passes), and among the ones that fit the best-seeded plays.
+    qualities: ['1080p', '720p'] as string[],
+    codecs: ['h264', 'h265', 'av1'] as string[],
+    // Every audio codec plays: Nova converts the ones browsers can't decode.
+    audioCodecs: ['aac', 'opus', 'mp3', 'eac3', 'ac3', 'dts', 'truehd', 'flac'] as string[],
+    // Release types (remux | bluray | webdl | web | hdtv | dvd).
+    formats: ['bluray', 'webdl', 'web', 'hdtv'] as string[],
+    allowHdr: false,
     minSeeders: 3,
-    maxSizeGb: 6,
+    maxSizeGb: 8,
     preferredLanguages: ['en'] as string[],
-    preferRemux: false,
-    hdr: false,
     indexerIds: [] as number[], // legacy (Prowlarr ids); sources are plugins now
     // Movies/shows: this indexer or source plugin is shown first; others collapse.
     preferredIndexer: '',
@@ -207,11 +206,36 @@ function safeJson(text: string): unknown {
   }
 }
 
+const LEGACY_TORRENT_KEYS = ['preferredQualities', 'maxQuality', 'preferredCodecs', 'preferredAudio', 'preferredSources', 'preferRemux', 'hdr'];
+const QUALITY_ORDER = ['480p', '720p', '1080p', '2160p'];
+
+/**
+ * Torrent preferences used to be best-first rankings (preferredQualities, ...). Keep what still
+ * means the same as a requirement (which resolutions, HDR, remuxes); `strict` (quality profiles)
+ * also keeps the codec and release-type lists.
+ */
+export function migrateTorrentPrefs(torrent: Record<string, unknown> | undefined, strict = false): Record<string, unknown> {
+  if (!torrent || 'qualities' in torrent || !('preferredQualities' in torrent)) return torrent ?? {};
+  const out: Record<string, unknown> = { ...torrent };
+  const max = QUALITY_ORDER.indexOf(String(torrent.maxQuality ?? '2160p'));
+  const qualities = (torrent.preferredQualities as string[]).filter((q) => max < 0 || QUALITY_ORDER.indexOf(q) <= max);
+  if (qualities.length) out.qualities = qualities;
+  out.allowHdr = Boolean(torrent.hdr);
+  if (strict && Array.isArray(torrent.preferredCodecs) && torrent.preferredCodecs.length) out.codecs = torrent.preferredCodecs;
+  if (strict && Array.isArray(torrent.preferredSources) && torrent.preferredSources.length) out.formats = torrent.preferredSources;
+  if (torrent.preferRemux) out.formats = [...new Set([...((out.formats as string[]) ?? DEFAULT_PREFERENCES.torrent.formats), 'remux'])];
+  for (const k of LEGACY_TORRENT_KEYS) delete out[k];
+  return out;
+}
+
+function storedPreferences(profileId: string): Record<string, unknown> {
+  const row = db.prepare('SELECT data FROM preferences WHERE profile_id = ?').get(profileId) as { data: string } | undefined;
+  const data = (row ? safeJson(row.data) : {}) as Record<string, unknown>;
+  return isPlainObject(data) ? { ...data, torrent: migrateTorrentPrefs(data.torrent as Record<string, unknown> | undefined) } : {};
+}
+
 export function getPreferences(profileId: string): typeof DEFAULT_PREFERENCES {
-  const row = db.prepare('SELECT data FROM preferences WHERE profile_id = ?').get(profileId) as
-    | { data: string }
-    | undefined;
-  return deepMerge(DEFAULT_PREFERENCES, row ? safeJson(row.data) : {});
+  return deepMerge(DEFAULT_PREFERENCES, storedPreferences(profileId));
 }
 
 export function updatePreferences(profileId: string, patch: unknown): typeof DEFAULT_PREFERENCES {
