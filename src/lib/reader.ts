@@ -11,6 +11,11 @@ export function chapterOf(v: { episode?: number | null; title?: string | null })
   return m ? Number(m[1]) : undefined;
 }
 
+type Ordered = { season?: number; episode?: number };
+/** Chapters run by chapter number (volumes are often missing for the newest ones); episodes by season first. */
+export const byChapter = (a: Ordered, b: Ordered) => (a.episode ?? 0) - (b.episode ?? 0) || (a.season ?? 0) - (b.season ?? 0);
+export const byEpisode = (a: Ordered, b: Ordered) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0);
+
 function hash(s: string): string {
   let h = 5381;
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;

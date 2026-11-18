@@ -178,6 +178,14 @@ export function Player(p: PlayerProps) {
   const [rate, setRate] = useState(prefs?.ui.playbackSpeed ?? 1);
   const [fullscreen, setFullscreen] = useState(false);
   const [chrome, setChrome] = useState(true);
+  // HDR screens (where HDR video, or RTX Video HDR, outshines plain white) get high-contrast controls.
+  const [hdrScreen, setHdrScreen] = useState(() => typeof matchMedia === 'function' && matchMedia('(dynamic-range: high)').matches);
+  useEffect(() => {
+    const mq = matchMedia('(dynamic-range: high)');
+    const on = () => setHdrScreen(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
   const [panel, setPanel] = useState<Panel>(null);
   const seasons = (p.detail?.seasons ?? []).filter((s) => s.episodeCount > 0 || s.season === p.season);
   const [epSeason, setEpSeason] = useState(p.season ?? 1);
@@ -952,7 +960,7 @@ export function Player(p: PlayerProps) {
       ref={box}
       onPointerMove={poke}
       onPointerDown={poke}
-      className={cls('fixed inset-0 z-[60] overflow-hidden bg-black select-none', !chromeOn && 'cursor-hidden')}
+      className={cls('fixed inset-0 z-[60] overflow-hidden bg-black select-none', !chromeOn && 'cursor-hidden', hdrScreen && 'hdr-ui')}
     >
       <video
         ref={attachVideo}
@@ -1005,7 +1013,7 @@ export function Player(p: PlayerProps) {
           }
         }}
         onError={onVideoError}
-        className={cls('absolute inset-0 size-full object-contain transition-opacity', enhance !== 'none' && 'opacity-0')}
+        className={cls('hdr-video absolute inset-0 size-full object-contain transition-opacity', enhance !== 'none' && 'opacity-0')}
       />
       {enhance !== 'none' && <canvas ref={setCanvasEl} className="pointer-events-none absolute inset-0 size-full object-contain" />}
       <div ref={setAssHost} className="pointer-events-none absolute inset-0 z-[5]" />
@@ -1181,8 +1189,8 @@ export function Player(p: PlayerProps) {
       {/* chrome */}
       {/* Only the bars take pointer events, so clicks in the middle reach the video. */}
       <motion.div animate={{ opacity: chromeOn ? 1 : 0 }} transition={{ duration: 0.25 }} className="pointer-events-none absolute inset-0 z-20">
-        <div className="absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/80 to-transparent" />
-        <div className="absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
+        <div className="player-scrim absolute inset-x-0 top-0 h-40 bg-gradient-to-b from-black/80 to-transparent" />
+        <div className="player-scrim absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
 
         <div
           className={cls('wco-pad absolute inset-x-0 top-0', chromeOn && 'app-drag pointer-events-auto')}

@@ -148,13 +148,19 @@ export interface WatchedSummary {
   mediaId: string;
   /** Episodes with a saved position (or the movie itself). */
   started: number;
+  /** Episodes watched: marked finished, or played to (nearly) the end. */
   finished: number;
+  /** Their episode numbers (anime: the schedule marks these). */
+  watchedEpisodes: number[];
   /** Fraction of the most recent item, for the movie/one-off progress bar. */
   lastPercent: number;
   lastSeason: number | null;
   lastEpisode: number | null;
   updatedAt: string;
 }
+
+const WATCHED_SHARE = 0.9;
+const isWatched = (r: ProgressRow) => r.finished === 1 || (r.duration_seconds != null && r.duration_seconds > 0 && r.position_seconds / r.duration_seconds >= WATCHED_SHARE);
 
 /** One row per title the profile has touched — drives the catalogue badges. */
 export function watchedSummaries(profileId: string): WatchedSummary[] {
@@ -173,6 +179,7 @@ export function watchedSummaries(profileId: string): WatchedSummary[] {
         mediaId: r.media_id,
         started: 0,
         finished: 0,
+        watchedEpisodes: [],
         lastPercent: r.finished ? 1 : pct,
         lastSeason: r.season,
         lastEpisode: r.episode,
@@ -181,7 +188,10 @@ export function watchedSummaries(profileId: string): WatchedSummary[] {
       byMedia.set(r.media_id, entry);
     }
     entry.started++;
-    if (r.finished) entry.finished++;
+    if (isWatched(r)) {
+      entry.finished++;
+      if (r.episode != null) entry.watchedEpisodes.push(r.episode);
+    }
   }
   return [...byMedia.values()];
 }

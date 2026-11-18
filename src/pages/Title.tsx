@@ -422,8 +422,9 @@ function EpisodeRow({
       layout
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      onClick={() => !upcoming && navigate(watchPath({ mediaId: detail.id, season: ep.season, episode: ep.episode }))}
-      className={cls('group flex cursor-pointer gap-4 rounded-2xl p-2.5 transition-colors hover:bg-white/5', upcoming && 'cursor-default opacity-50', focused && 'bg-white/6 ring-1 ring-accent/60')}
+      onClick={() => navigate(watchPath({ mediaId: detail.id, season: ep.season, episode: ep.episode }))}
+      title={upcoming ? 'Not out yet according to the listings, which are sometimes wrong: Nova looks for sources anyway' : undefined}
+      className={cls('group flex cursor-pointer gap-4 rounded-2xl p-2.5 transition-colors hover:bg-white/5', upcoming && 'opacity-60 hover:opacity-100', focused && 'bg-white/6 ring-1 ring-accent/60')}
     >
       <div className="relative aspect-video w-36 shrink-0 overflow-hidden rounded-xl bg-ink-800 sm:w-52">
         {ep.still ? (
@@ -431,13 +432,11 @@ function EpisodeRow({
         ) : (
           <div className="grid size-full place-items-center font-display text-2xl text-faint">{ep.episode}</div>
         )}
-        {!upcoming && (
-          <div className="absolute inset-0 grid place-items-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
-            <span className="grid size-10 place-items-center rounded-full bg-white/95 text-black">
-              <Play className="size-4 translate-x-px fill-current" />
-            </span>
-          </div>
-        )}
+        <div className="absolute inset-0 grid place-items-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
+          <span className="grid size-10 place-items-center rounded-full bg-white/95 text-black">
+            <Play className="size-4 translate-x-px fill-current" />
+          </span>
+        </div>
         {pct > 0 && !watched && (
           <div className="absolute inset-x-0 bottom-0 h-1 bg-black/50">
             <div className="h-full bg-progress" style={{ width: `${pct * 100}%` }} />

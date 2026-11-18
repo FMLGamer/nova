@@ -5,24 +5,29 @@ import { Search as SearchIcon, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { useContributions } from '../lib/queries';
 import { PosterCard } from '../components/media';
+import { ReadCard } from '../components/ReadCard';
 import { Empty, Segmented, Spinner } from '../components/ui';
 import { MetaCard } from './PluginMeta';
+
+type Tab = 'all' | 'movies' | 'shows' | 'anime' | 'read';
 
 export default function Search() {
   const [params, setParams] = useSearchParams();
   const q = params.get('q') ?? '';
+  const type = params.get('type');
   const [text, setText] = useState(q);
-  const [tab, setTab] = useState<'all' | 'movies' | 'shows' | 'anime'>('all');
+  const [tab, setTab] = useState<Tab>(type === 'movies' || type === 'shows' || type === 'anime' || type === 'read' ? type : 'all');
   const { data: contrib } = useContributions();
 
   useEffect(() => {
     const t = window.setTimeout(() => {
-      if (text.trim() !== q) setParams(text.trim() ? { q: text.trim() } : {}, { replace: true });
+      if (text.trim() !== q) setParams(text.trim() ? { q: text.trim(), ...(type ? { type } : {}) } : {}, { replace: true });
     }, 300);
     return () => window.clearTimeout(t);
-  }, [text, q, setParams]);
+  }, [text, q, type, setParams]);
 
   const res = useQuery({ queryKey: ['search', q], queryFn: () => api.catalog.search(q), enabled: q.length >= 2, staleTime: 5 * 60_000 });
+  const reads = useQuery({ queryKey: ['search-read', q], queryFn: () => api.catalog.readSearch(q), enabled: q.length >= 2, staleTime: 5 * 60_000 });
   const plugins = useQuery({
     queryKey: ['search-plugins', q],
     enabled: q.length >= 2 && Boolean(contrib?.searchCatalogs.length),
@@ -44,7 +49,8 @@ export default function Search() {
     { key: 'shows' as const, title: 'Shows', items: res.data?.shows ?? [] },
     { key: 'anime' as const, title: 'Anime', items: res.data?.anime ?? [] },
   ].filter((g) => g.items.length && (tab === 'all' || tab === g.key));
-  const total = (res.data?.movies.length ?? 0) + (res.data?.shows.length ?? 0) + (res.data?.anime.length ?? 0);
+  const readItems = tab === 'all' || tab === 'read' ? (reads.data ?? []) : [];
+  const total = (res.data?.movies.length ?? 0) + (res.data?.shows.length ?? 0) + (res.data?.anime.length ?? 0) + (reads.data?.length ?? 0);
 
   return (
     <div className="px-5 pt-24 sm:px-10 sm:pt-28">
@@ -74,6 +80,7 @@ export default function Search() {
             { value: 'movies', label: `Movies ${res.data?.movies.length ?? 0}` },
             { value: 'shows', label: `Shows ${res.data?.shows.length ?? 0}` },
             { value: 'anime', label: `Anime ${res.data?.anime.length ?? 0}` },
+            { value: 'read', label: `Manga & books ${reads.data?.length ?? 0}` },
           ]}
         />
       )}
@@ -95,6 +102,16 @@ export default function Search() {
             </div>
           </section>
         ))}
+        {readItems.length > 0 && (
+          <section>
+            <h2 className="mb-4 font-display text-xl font-semibold">Manga & books</h2>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-x-4 gap-y-6 sm:grid-cols-[repeat(auto-fill,minmax(168px,1fr))]">
+              {readItems.map((it) => (
+                <ReadCard key={it.id} item={it} />
+              ))}
+            </div>
+          </section>
+        )}
         {tab === 'all' &&
           plugins.data?.map(({ c, metas }) => (
             <section key={`${c.pluginId}:${c.id}`}>

@@ -1,9 +1,9 @@
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { BookOpen, Play } from 'lucide-react';
+import { BookOpen, ExternalLink, Play } from 'lucide-react';
 import { useEffect } from 'react';
 import { api } from '../lib/api';
-import { chapterOf, readerPath } from '../lib/reader';
+import { byChapter, byEpisode, chapterOf, readerPath } from '../lib/reader';
 import { titlePath } from '../lib/format';
 import { useContributions } from '../lib/queries';
 import { errorText, toast, useApp } from '../lib/store';
@@ -89,7 +89,8 @@ export default function PluginMeta() {
       }),
     );
 
-  const videos = [...(meta.videos ?? [])].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));
+  const videos = [...(meta.videos ?? [])].sort(readable ? byChapter : byEpisode);
+  const local = videos.filter((v) => !v.externalUrl);
 
   return (
     <div className="px-5 pt-28 sm:px-10">
@@ -99,8 +100,8 @@ export default function PluginMeta() {
           <h1 className="font-display text-4xl font-bold sm:text-5xl">{meta.name}</h1>
           <div className="mt-2 text-sm text-muted">{[meta.releaseInfo, ...(meta.genres ?? []).slice(0, 4)].filter(Boolean).join(' · ')}</div>
           {meta.description && <p className="mt-4 max-w-3xl leading-relaxed text-white/80">{meta.description}</p>}
-          {readable && videos[0] && (
-            <Button className="mt-6" variant="white" size="lg" icon={<BookOpen className="size-5" />} onClick={() => openChapter(videos[0]!)}>
+          {readable && local[0] && (
+            <Button className="mt-6" variant="white" size="lg" icon={<BookOpen className="size-5" />} onClick={() => openChapter(local[0]!)}>
               Start reading
             </Button>
           )}
@@ -110,6 +111,11 @@ export default function PluginMeta() {
             </p>
           )}
           {readable && !videos.length && <p className="mt-6 text-sm text-faint">No readable chapters in your language from this source — try changing the plugin's language in Server → Plugins.</p>}
+          {readable && videos.length > local.length && (
+            <p className="mt-4 max-w-2xl text-sm text-faint">
+              {local.length ? 'Some chapters' : 'The chapters'} of this series are only published officially, so this source links to the publisher's site for them instead of hosting them.
+            </p>
+          )}
         </div>
       </div>
       {videos.length > 0 && (
@@ -119,13 +125,23 @@ export default function PluginMeta() {
             {videos.map((v) => (
               <button
                 key={v.id}
-                onClick={() => (readable ? openChapter(v) : toast('Not playable from a plugin page'))}
+                onClick={() => (v.externalUrl ? window.open(v.externalUrl, '_blank', 'noopener') : readable ? openChapter(v) : toast('Not playable from a plugin page'))}
                 className="flex items-center gap-3 rounded-2xl border border-line p-3 text-left transition hover:border-line-strong hover:bg-white/4"
               >
-                {v.thumbnail ? <img src={v.thumbnail} alt="" className="h-12 w-20 shrink-0 rounded-lg object-cover" /> : <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-white/6 text-muted">{readable ? <BookOpen className="size-4" /> : <Play className="size-4" />}</span>}
+                {v.thumbnail ? (
+                  <img src={v.thumbnail} alt="" className="h-12 w-20 shrink-0 rounded-lg object-cover" />
+                ) : (
+                  <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-white/6 text-muted">
+                    {v.externalUrl ? <ExternalLink className="size-4" /> : readable ? <BookOpen className="size-4" /> : <Play className="size-4" />}
+                  </span>
+                )}
                 <span className="min-w-0">
                   <span className="block truncate text-sm font-medium">{v.title}</span>
-                  {v.released && <span className="block text-xs text-faint">{new Date(v.released).toLocaleDateString()}</span>}
+                  {(v.externalUrl || v.released) && (
+                    <span className="block truncate text-xs text-faint">
+                      {[v.released && new Date(v.released).toLocaleDateString(), v.externalUrl && (v.overview ?? 'Opens on the publisher\'s site')].filter(Boolean).join(' · ')}
+                    </span>
+                  )}
                 </span>
               </button>
             ))}

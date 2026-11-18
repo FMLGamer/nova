@@ -1,0 +1,22 @@
+{
+  "appId": "io.github.fmlgamer.nova",
+  "appName": "Nova",
+  "webDir": "www",
+  "loggingBehavior": "none",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": true,
+    "allowNavigation": ["*"],
+    "errorPath": "error.html"
+  },
+  "android": {
+    "appendUserAgent": "NovaAndroid",
+    "allowMixedContent": true,
+    "backgroundColor": "#07070b",
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": false }
+  }
+}

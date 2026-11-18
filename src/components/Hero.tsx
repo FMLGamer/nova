@@ -6,14 +6,18 @@ import { cls, metaLine, titlePath, watchPath } from '../lib/format';
 import { playIntent } from '../lib/intent';
 import { useDetail, useListToggle, useMediaProgress, usePrefs } from '../lib/queries';
 import { useApp } from '../lib/store';
-import type { CatalogItem } from '../lib/types';
+import type { CatalogItem, HeroSize } from '../lib/types';
 import { Trailer } from './Trailer';
 import { Button } from './ui';
 
 const rise = { hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0, transition: { duration: 0.28, ease: [0.2, 0, 0, 1] as const } } };
 
-/** Section pages use a hero about half the height of Home's. */
-export const HERO_HEIGHT = { full: 'h-[78svh] min-h-[520px] sm:h-[86svh]', compact: 'h-[40svh] min-h-[300px] sm:h-[44svh]' };
+export const HERO_HEIGHT: Record<HeroSize, string> = {
+  small: 'h-[32svh] min-h-[270px] sm:h-[34svh]',
+  medium: 'h-[40svh] min-h-[300px] sm:h-[44svh]',
+  large: 'h-[60svh] min-h-[420px] sm:h-[64svh]',
+  full: 'h-[78svh] min-h-[520px] sm:h-[86svh]',
+};
 
 function useScrollFade() {
   const { scrollY } = useScroll();
@@ -31,7 +35,8 @@ function Shade() {
   );
 }
 
-export function Hero({ item, eyebrow, compact }: { item: CatalogItem; eyebrow?: ReactNode; compact?: boolean }) {
+export function Hero({ item, eyebrow, size = 'full' }: { item: CatalogItem; eyebrow?: ReactNode; size?: HeroSize }) {
+  const compact = size === 'small' || size === 'medium';
   const navigate = useNavigate();
   const { data: prefs } = usePrefs();
   const { data: detail } = useDetail(item.id);
@@ -60,7 +65,7 @@ export function Hero({ item, eyebrow, compact }: { item: CatalogItem; eyebrow?: 
 
   const long = item.title.length > 28;
   return (
-    <section className={cls('relative w-full overflow-hidden', compact ? HERO_HEIGHT.compact : HERO_HEIGHT.full)}>
+    <section className={cls('relative w-full overflow-hidden', HERO_HEIGHT[size])}>
       <motion.div style={{ opacity: heroOpacity }} className="absolute inset-0">
         <motion.img
           key={item.id}
@@ -113,7 +118,7 @@ export function Hero({ item, eyebrow, compact }: { item: CatalogItem; eyebrow?: 
             </motion.div>
             <motion.p
               variants={rise}
-              className={cls('max-w-xl leading-relaxed text-white/75', compact ? 'mt-2.5 line-clamp-2 text-sm' : 'mt-4 line-clamp-3 text-[15px] sm:text-base')}
+              className={cls('max-w-xl leading-relaxed text-white/75', size === 'small' ? 'hidden' : compact ? 'mt-2.5 line-clamp-2 text-sm' : 'mt-4 line-clamp-3 text-[15px] sm:text-base')}
             >
               {item.overview}
             </motion.p>
@@ -163,6 +168,7 @@ export function Spotlight({
   meta,
   description,
   actions,
+  size = 'medium',
 }: {
   backdrop?: string | null;
   art?: string | null;
@@ -171,12 +177,13 @@ export function Spotlight({
   meta?: ReactNode;
   description?: string | null;
   actions?: ReactNode;
+  size?: HeroSize;
 }) {
   const opacity = useScrollFade();
   const setAmbient = useApp((s) => s.setAmbient);
   useEffect(() => setAmbient(backdrop ?? art ?? null), [backdrop, art, setAmbient]);
   return (
-    <section className={cls('relative w-full overflow-hidden', HERO_HEIGHT.compact)}>
+    <section className={cls('relative w-full overflow-hidden', HERO_HEIGHT[size])}>
       <motion.div style={{ opacity }} className="absolute inset-0">
         {backdrop ? (
           <motion.img key={backdrop} src={backdrop} alt="" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 size-full object-cover" />
@@ -213,7 +220,7 @@ export function Spotlight({
                 {meta}
               </motion.div>
             )}
-            {description && (
+            {description && size !== 'small' && (
               <motion.p variants={rise} className="mt-2.5 line-clamp-2 max-w-xl text-sm leading-relaxed text-white/75">
                 {description}
               </motion.p>

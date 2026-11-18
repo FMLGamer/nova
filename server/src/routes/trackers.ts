@@ -141,7 +141,7 @@ trackersRouter.get(
       res.json({ ids: [] });
       return;
     }
-    const items = await trackedLists(req.profile!.id).catch(() => []);
+    const items = await trackedLists(req.profile!.id);
     res.json({ ids: items.filter((i) => i.status === 'watching' || i.status === 'rewatching').map((i) => i.mediaId) });
   }),
 );

@@ -238,6 +238,8 @@ export interface MetaVideo {
   episode?: number;
   thumbnail?: string;
   overview?: string;
+  /** Only readable/watchable elsewhere (e.g. an official publisher's site). */
+  externalUrl?: string;
 }
 
 export interface Meta extends MetaPreview {

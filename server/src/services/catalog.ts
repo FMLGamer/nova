@@ -74,6 +74,12 @@ async function animeEpisodes(providerId: string): Promise<Episode[]> {
   return marks?.size ? list.map((e) => (marks.has(e.episode) ? { ...e, filler: marks.get(e.episode)! } : e)) : list;
 }
 
+/** Sources disagree on air dates (advance screenings, time zones): the earliest one is the safest bet. */
+function earliest(a: string | null | undefined, b: string | null | undefined): string | null {
+  if (!a || !b) return a || b || null;
+  return Date.parse(a) <= Date.parse(b) ? a : b;
+}
+
 async function animeEpisodeList(providerId: string): Promise<Episode[]> {
   const [aniList, zip] = await Promise.all([anilistEpisodes(providerId).catch(() => [] as Episode[]), aniZip(providerId)]);
   const zipped = zipEpisodes(zip);
@@ -85,7 +91,7 @@ async function animeEpisodeList(providerId: string): Promise<Episode[]> {
       const a = aniList[n - 1];
       if (z) {
         const e = toEpisode(providerId, n, z);
-        out.push(a && !z.image ? { ...e, still: a.still } : e);
+        out.push({ ...e, still: a && !z.image ? a.still : e.still, airDate: earliest(e.airDate, a?.airDate) });
       } else if (a) out.push(a);
     }
     if (out.length) return out;
@@ -108,7 +114,7 @@ async function animeEpisodesFromTmdb(providerId: string, aniList: Episode[]): Pr
       const out: Episode[] = [];
       for (let i = 0; i < count; i++) {
         const t = tmdbEps[i];
-        if (t) out.push({ ...t, id: `anime:${providerId}:e${i + 1}`, season: 1, episode: i + 1 });
+        if (t) out.push({ ...t, id: `anime:${providerId}:e${i + 1}`, season: 1, episode: i + 1, airDate: earliest(t.airDate, aniList[i]?.airDate) });
         else if (aniList[i]) out.push(aniList[i]!);
       }
       return out;
@@ -138,7 +144,7 @@ async function animeEpisodesFromTmdb(providerId: string, aniList: Episode[]): Pr
     const out: Episode[] = [];
     for (let i = 0; i < count; i++) {
       const t = tv[i];
-      if (t) out.push({ ...t, id: `anime:${providerId}:e${i + 1}`, season: 1, episode: i + 1 });
+      if (t) out.push({ ...t, id: `anime:${providerId}:e${i + 1}`, season: 1, episode: i + 1, airDate: earliest(t.airDate, aniList[i]?.airDate) });
       else if (aniList[i]) out.push(aniList[i]!);
     }
     return out.length ? out : aniList;

@@ -31,7 +31,7 @@ import { cls, relTime, reportIssueUrl } from '../lib/format';
 import { useAppConfig, useContributions, useNotifications, usePrefs, useProfile, useSession } from '../lib/queries';
 import { toast, useApp } from '../lib/store';
 import { Avatar, Menu, MenuItem, Spinner, Toaster } from './ui';
-import { CommandPalette } from './CommandPalette';
+import { CommandPalette, searchScope } from './CommandPalette';
 import { AudioDock } from './AudioDock';
 import { Logo } from './Logo';
 
@@ -57,7 +57,8 @@ function useNav(): NavEntry[] {
   if (s?.liveTvEnabled) nav.push({ to: '/live', label: 'Live', icon: Radio });
   nav.push({ to: '/read', label: 'Read', icon: BookOpen });
   if (s?.musicBooksEnabled && prefs?.ui.musicAndBooks) nav.push({ to: '/music', label: 'Music', icon: Music2 });
-  return nav;
+  const hidden = new Set(prefs?.ui.navHidden ?? []);
+  return nav.filter((n) => !hidden.has(n.to.slice(1)));
 }
 
 /** Keeps the <html> attributes (accent, motion) and plugin themes in sync with the profile. */
@@ -154,10 +155,10 @@ function Notifications() {
             if (!open && unread) api.me.readNotifications().then(() => qc.invalidateQueries({ queryKey: ['notifications'] }));
           }}
           aria-label="Notifications"
-          className="relative grid size-10 place-items-center rounded-full text-muted transition-colors hover:bg-white/8 hover:text-fg"
+          className="relative grid size-8 place-items-center rounded-full transition-colors hover:bg-white/10 hover:text-fg"
         >
-          <Bell className="size-[19px]" />
-          {unread > 0 && <span className="bg-gradient-accent absolute top-2 right-2 size-2.5 rounded-full ring-2 ring-bg" />}
+          <Bell className="size-[18px]" />
+          {unread > 0 && <span className="bg-gradient-accent absolute top-1 right-1 size-2.5 rounded-full ring-2 ring-bg" />}
         </button>
       )}
     >
@@ -204,7 +205,7 @@ function ProfileMenu() {
     <Menu
       width="w-64"
       trigger={(_o, toggle) => (
-        <button onClick={toggle} aria-label="Account" className="rounded-full p-0.5 ring-2 ring-transparent transition hover:ring-white/20">
+        <button onClick={toggle} aria-label="Account" className="rounded-full ring-2 ring-transparent transition hover:ring-white/25">
           <Avatar avatar={profile.avatar} name={profile.name} className="size-8 text-sm" />
         </button>
       )}
@@ -356,8 +357,9 @@ function TopBar() {
     return () => window.removeEventListener('scroll', on);
   }, []);
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
-  // Over a hero the bar has no background of its own: give the controls one, so they read on light and dark art alike.
-  const pill = scrolled ? '' : 'bg-black/35 ring-1 ring-white/10 backdrop-blur-xl';
+  const scope = searchScope(useLocation().pathname);
+  // Every control group is the same pill: over a hero it brings its own dark glass, so it reads on light and dark art alike.
+  const shell = cls('flex h-10 items-center rounded-full ring-1 transition-colors', scrolled ? 'bg-white/[0.06] text-muted ring-white/10' : 'bg-black/35 text-white/85 ring-white/10 backdrop-blur-xl');
 
   return (
     <header className="pt-safe fixed inset-x-0 top-0 z-50">
@@ -368,14 +370,14 @@ function TopBar() {
         )}
       >
         <div className="mx-auto flex h-16 items-center gap-2 px-4 sm:gap-4 sm:px-8">
-          <button onClick={() => setDrawer(true)} aria-label="Open menu" className={cls('grid size-10 shrink-0 place-items-center rounded-full text-fg transition-colors hover:bg-white/10 lg:hidden', pill)}>
+          <button onClick={() => setDrawer(true)} aria-label="Open menu" className={cls(shell, 'w-10 shrink-0 justify-center hover:text-fg lg:hidden')}>
             <MenuIcon className="size-5" />
           </button>
           <Link to="/" aria-label="Nova home" className="mr-1 shrink-0 [filter:drop-shadow(0_1px_6px_rgb(0_0_0/0.45))]">
             <Logo />
           </Link>
 
-          <nav className={cls('hidden items-center rounded-full p-1 transition-colors lg:flex', pill)}>
+          <nav className={cls(shell, 'hidden p-1 lg:flex')}>
             {nav.map((n) => (
               <NavLink key={n.to} to={n.to} end={n.end} className="relative rounded-full px-4 py-1.5 text-sm font-medium transition-colors">
                 {({ isActive }) => (
@@ -383,7 +385,7 @@ function TopBar() {
                     {isActive && (
                       <motion.span layoutId="nav-pill" className="absolute inset-0 rounded-full bg-white/15 ring-1 ring-white/15" transition={{ type: 'spring', stiffness: 1000, damping: 64 }} />
                     )}
-                    <span className={cls('relative', isActive ? 'text-white' : scrolled ? 'text-muted hover:text-fg' : 'text-white/80 hover:text-white')}>{n.label}</span>
+                    <span className={cls('relative', isActive ? 'text-white' : 'hover:text-fg')}>{n.label}</span>
                   </>
                 )}
               </NavLink>
@@ -392,22 +394,15 @@ function TopBar() {
 
           <div className="flex-1" />
 
-          <button
-            onClick={() => setPalette(true)}
-            className="glass flex h-10 items-center gap-2.5 rounded-full pr-2 pl-3.5 text-sm text-muted transition-colors hover:text-fg max-sm:size-10 max-sm:justify-center max-sm:p-0 sm:w-56"
-          >
+          <button onClick={() => setPalette(true)} className={cls(shell, 'gap-2.5 pr-1.5 pl-3.5 text-sm hover:text-fg max-sm:w-10 max-sm:justify-center max-sm:p-0 sm:w-56')}>
             <Search className="size-[18px] shrink-0" />
-            <span className="flex-1 text-left max-sm:hidden">Search</span>
-            <kbd className="rounded-md bg-white/8 px-1.5 py-0.5 font-sans text-[11px] text-faint max-sm:hidden">{isMac ? '⌘' : 'Ctrl'} K</kbd>
+            <span className="flex-1 truncate text-left max-sm:hidden">{scope ? `Search ${scope.label.toLowerCase()}` : 'Search'}</span>
+            <kbd className="rounded-full bg-white/10 px-2 py-0.5 font-sans text-[11px] text-faint max-sm:hidden">{isMac ? '⌘' : 'Ctrl'} K</kbd>
           </button>
-          <div className={cls('flex items-center gap-0.5 rounded-full p-0.5 transition-colors', pill)}>
+          <div className={cls(shell, 'gap-0.5 p-1')}>
             {session?.settings.assistantEnabled && (
-              <button
-                onClick={() => openAssistant()}
-                aria-label="Assistant"
-                className="grid size-10 place-items-center rounded-full text-muted transition-colors hover:bg-white/8 hover:text-fg"
-              >
-                <Sparkles className="size-[19px]" />
+              <button onClick={() => openAssistant()} aria-label="Assistant" className="grid size-8 place-items-center rounded-full transition-colors hover:bg-white/10 hover:text-fg">
+                <Sparkles className="size-[18px]" />
               </button>
             )}
             <Notifications />
@@ -422,14 +417,17 @@ function TopBar() {
 
 function MobileNav() {
   const { data: session } = useSession();
-  const items: NavEntry[] = [
-    { to: '/', label: 'Home', icon: House, end: true },
+  const { data: prefs } = usePrefs();
+  const hidden = new Set(prefs?.ui.navHidden ?? []);
+  const tabs: NavEntry[] = [
     { to: '/movies', label: 'Movies', icon: Clapperboard },
     { to: '/shows', label: 'Shows', icon: Tv },
     { to: '/anime', label: 'Anime', icon: Swords },
-    session?.settings.liveTvEnabled ? { to: '/live', label: 'Live', icon: Radio } : { to: '/read', label: 'Read', icon: BookOpen },
-    { to: '/library', label: 'Library', icon: UserRound },
-  ];
+    ...(session?.settings.liveTvEnabled ? [{ to: '/live', label: 'Live', icon: Radio }] : []),
+    { to: '/read', label: 'Read', icon: BookOpen },
+  ].filter((n) => !hidden.has(n.to.slice(1)));
+  // Room for four tabs between Home and Library.
+  const items: NavEntry[] = [{ to: '/', label: 'Home', icon: House, end: true }, ...tabs.slice(0, 4), { to: '/library', label: 'Library', icon: UserRound }];
   return (
     <nav className="pb-safe glass-strong fixed inset-x-0 bottom-0 z-50 border-x-0 border-b-0 sm:hidden">
       <div className="flex h-16 items-stretch justify-around px-1">

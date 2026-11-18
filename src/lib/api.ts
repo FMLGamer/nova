@@ -18,6 +18,9 @@ export class ApiError extends Error {
   }
 }
 
+/** react-query `retry` for calls that go out to a rate-limited service: try again when it was busy or down, not on 4xx. */
+export const retryUpstream = (count: number, e: unknown) => count < 3 && (!(e instanceof ApiError) || e.status >= 500);
+
 type Query = Record<string, string | number | boolean | null | undefined>;
 
 function qs(query?: Query): string {
@@ -106,11 +109,12 @@ export const api = {
     animeGenres: () => get<{ genres: { id: string; name: string }[] }>('/api/catalog/anime/genres').then((r) => r.genres),
     animeBrowse: (q: { page: number; genre?: string; sort?: string; format?: string }) =>
       get<{ items: T.CatalogItem[] }>('/api/catalog/anime/browse', q).then((r) => r.items),
-    animeRecent: () => get<{ items: T.CatalogItem[] }>('/api/catalog/anime/recent').then((r) => r.items),
+    animeRecent: (page = 1) => get<{ items: T.CatalogItem[] }>('/api/catalog/anime/recent', { page }).then((r) => r.items),
     readBrowse: (q: { page: number; format?: string; genre?: string; sort?: string }) => get<{ items: T.ReadItem[] }>('/api/catalog/read/browse', q).then((r) => r.items),
     readGenres: (format: string) => get<{ genres: string[] }>('/api/catalog/read/genres', { format }).then((r) => r.genres),
     readDetail: (kind: string, id: string) => get<T.ReadDetail>(`/api/catalog/read/${enc(kind)}/${enc(id)}`),
     readFree: (title: string, author: string | null) => get<{ epub: string | null }>('/api/catalog/read/free', { title, ...(author ? { author } : {}) }).then((r) => r.epub),
+    readSearch: (q: string) => get<{ items: T.ReadItem[] }>('/api/catalog/read/search', { q }).then((r) => r.items),
     schedule: (week: number) => get<{ schedule: T.AiringEntry[] }>('/api/catalog/anime/schedule', { week }).then((r) => r.schedule),
     search: (q: string) => get<{ movies: T.CatalogItem[]; shows: T.CatalogItem[]; anime: T.CatalogItem[] }>('/api/catalog/search', { q }),
     because: (mediaId: string) => {
@@ -161,6 +165,8 @@ export const api = {
     stats: () => get<T.ProfileStats>('/api/me/stats'),
     recommendations: () => get<T.Recommendations>('/api/me/recommendations'),
     dismissRecommendation: (mediaId: string) => post('/api/me/recommendations/dismiss', { mediaId }),
+    importHistory: (csv: string) => post<{ job: T.ImportJob }>('/api/me/import', { csv }).then((r) => r.job),
+    importJob: (id: string) => get<{ job: T.ImportJob }>(`/api/me/import/${enc(id)}`).then((r) => r.job),
     notifications: () => get<{ notifications: T.Notification[] }>('/api/me/notifications').then((r) => r.notifications),
     readNotifications: () => post('/api/me/notifications/read'),
     tokens: () => get<{ tokens: T.ApiToken[] }>('/api/me/tokens').then((r) => r.tokens),

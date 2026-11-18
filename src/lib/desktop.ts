@@ -13,12 +13,16 @@ export interface DesktopUpdate {
 export interface DesktopSettings {
   autoUpdate: boolean;
   discord: boolean;
+  /** null: Nova's usual port (11471). */
+  port: number | null;
 }
 
 export interface DesktopInfo {
   version: string;
   platform: string;
   settings: DesktopSettings;
+  /** The port the server is on right now. */
+  port: number;
   update: DesktopUpdate;
   discordAvailable: boolean;
 }
@@ -38,6 +42,7 @@ interface DesktopApi {
   platform: string;
   info(): Promise<DesktopInfo | null>;
   setSettings(patch: Partial<DesktopSettings>): Promise<DesktopSettings>;
+  relaunch?(): Promise<boolean>;
   checkForUpdates(): Promise<DesktopUpdate | null>;
   installUpdate(): Promise<boolean>;
   onUpdate(cb: (s: DesktopUpdate) => void): () => void;

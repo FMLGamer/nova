@@ -9,7 +9,7 @@ import { getSkipTimes } from '../services/aniskip.js';
 import { downloadSubtitleVtt, searchSubtitles, subtitlesConfigured } from '../services/subtitles.js';
 import { activePlugins } from '../plugins/manager.js';
 import { pluginSubtitleVtt, pluginSubtitles } from '../plugins/subtitles.js';
-import { freeEdition, readBrowse, readDetail, readGenres } from '../services/readCatalog.js';
+import { freeEdition, readBrowse, readDetail, readGenres, readSearch } from '../services/readCatalog.js';
 import { HttpError } from '../lib/http.js';
 
 export const catalogRouter = Router();
@@ -59,8 +59,8 @@ catalogRouter.get(
 
 catalogRouter.get(
   '/anime/recent',
-  asyncHandler(async (_req, res) => {
-    res.json({ items: await anilistRecent() });
+  asyncHandler(async (req, res) => {
+    res.json({ items: await anilistRecent(Number(req.query.page) || 1) });
   }),
 );
 
@@ -108,6 +108,13 @@ catalogRouter.get(
   asyncHandler(async (req, res) => {
     const title = q(req.query.title);
     res.json({ epub: title ? await freeEdition(title, q(req.query.author) ?? null) : null });
+  }),
+);
+
+catalogRouter.get(
+  '/read/search',
+  asyncHandler(async (req, res) => {
+    res.json({ items: await readSearch(q(req.query.q) ?? '') });
   }),
 );
 

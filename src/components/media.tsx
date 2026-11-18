@@ -3,8 +3,10 @@ import { Children, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { Check, ChevronLeft, ChevronRight, Info, Play, Plus, X } from 'lucide-react';
 import { cls, episodeLabel, fmtLeft, fmtRuntime, kindLabel, titlePath, watchPath } from '../lib/format';
-import { useListToggle, useSummary } from '../lib/queries';
+import { useDragScroll } from '../lib/dragScroll';
+import { useListToggle, usePrefs, useSummary } from '../lib/queries';
 import type { CatalogItem } from '../lib/types';
+import { useTrackedAnime } from './Tracking';
 import { SectionTitle } from './ui';
 
 export type CardItem = Pick<CatalogItem, 'id' | 'mediaType' | 'title' | 'year' | 'poster'> & Partial<CatalogItem>;
@@ -13,10 +15,25 @@ export type CardItem = Pick<CatalogItem, 'id' | 'mediaType' | 'title' | 'year' |
 export function PosterCard({ item, className, rank, hint }: { item: CardItem; className?: string; rank?: number; hint?: ReactNode }) {
   const navigate = useNavigate();
   const summary = useSummary().data?.get(item.id);
+  const tracked = useTrackedAnime().get(item.id);
+  const { data: prefs } = usePrefs();
   const list = useListToggle();
   const inList = list.has(item.id);
   const isSeries = item.mediaType !== 'movie';
-  const watched = summary && (isSeries ? summary.finished > 0 : summary.lastPercent > 0.9 || summary.finished > 0);
+  // A series only gets the check once it's done; until then the badge says how far you are.
+  const episodesSeen = Math.max(summary?.finished ?? 0, tracked?.progress ?? 0);
+  const total = tracked?.episodes ?? null;
+  const watched = isSeries ? tracked?.status === 'completed' || (total != null && episodesSeen >= total) : Boolean(summary && (summary.lastPercent > 0.9 || summary.finished > 0));
+  const progressBadge =
+    isSeries && !watched && (summary?.started || tracked?.progress)
+      ? prefs?.beta?.episodeCounts
+        ? `${episodesSeen}${total ? `/${total}` : ''} watched`
+        : summary?.lastEpisode != null
+          ? episodeLabel(item.mediaType, summary.lastSeason, summary.lastEpisode)
+          : tracked?.progress
+            ? `E${tracked.progress}`
+            : null
+      : null;
   const meta = [item.year, fmtRuntime(item.runtime ?? null), isSeries ? kindLabel(item.mediaType) : null].filter(Boolean).join(' · ');
 
   const quickPlay = (e: React.MouseEvent) => {
@@ -63,9 +80,9 @@ export function PosterCard({ item, className, rank, hint }: { item: CardItem; cl
               <Check className="size-3.5" strokeWidth={3} />
             </span>
           )}
-          {isSeries && summary && !watched && summary.started > 0 && (
+          {progressBadge && (
             <span className="absolute top-2 right-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] font-semibold backdrop-blur">
-              {episodeLabel(item.mediaType, summary.lastSeason, summary.lastEpisode)}
+              {progressBadge}
             </span>
           )}
           {summary && summary.lastPercent > 0 && summary.lastPercent < 0.95 && (
@@ -173,19 +190,27 @@ export function Rail({
   children,
   wide,
   dense,
+  onEnd,
+  loadingMore,
 }: {
   title?: ReactNode;
   action?: ReactNode;
   children: ReactNode;
   wide?: boolean;
   dense?: boolean;
+  /** Called when the row is scrolled close to its end (load the next page). */
+  onEnd?: () => void;
+  /** Placeholder cards at the end while the next page loads. */
+  loadingMore?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ left: false, right: true });
+  useDragScroll(ref);
   const update = () => {
     const el = ref.current;
     if (!el) return;
     setEdges({ left: el.scrollLeft > 8, right: el.scrollLeft + el.clientWidth < el.scrollWidth - 8 });
+    if (onEnd && el.scrollLeft + el.clientWidth > el.scrollWidth - el.clientWidth * 0.6) onEnd();
   };
   useEffect(update, [children]);
   const scroll = (dir: 1 | -1) => ref.current?.scrollBy({ left: dir * ref.current.clientWidth * 0.85, behavior: 'smooth' });
@@ -204,6 +229,12 @@ export function Rail({
               {c}
             </div>
           ))}
+          {loadingMore &&
+            [0, 1, 2].map((i) => (
+              <div key={`more${i}`} className={cls('shrink-0', item)}>
+                <div className={cls('skeleton rounded-2xl', wide ? 'aspect-video' : 'aspect-[2/3]')} />
+              </div>
+            ))}
         </div>
         {edges.left && (
           <button

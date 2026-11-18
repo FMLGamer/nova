@@ -281,7 +281,12 @@ pluginsRouter.get(
     const p = active(req.params.id);
     const data = await callPlugin<{ meta?: Meta }>(p, 'meta', { type: req.params.type, id: req.params.metaId });
     if (!data?.meta) throw new HttpError(404, 'Not found');
-    res.json({ meta: { ...proxied(p, data.meta), videos: data.meta.videos?.map((v) => proxied(p, v)) } });
+    res.json({
+      meta: {
+        ...proxied(p, data.meta),
+        videos: data.meta.videos?.map((v) => ({ ...proxied(p, v), externalUrl: v.externalUrl && /^https?:\/\//i.test(v.externalUrl) ? v.externalUrl : undefined })),
+      },
+    });
   }),
 );
 

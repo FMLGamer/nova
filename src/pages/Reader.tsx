@@ -11,7 +11,7 @@ import { cls } from '../lib/format';
 import { offlineFile, useOffline } from '../lib/offline';
 import { usePrefs, useSavePrefs } from '../lib/queries';
 import { READING_FONTS } from '../lib/reading-fonts';
-import { chapterOf, readerKey, readerPath, type ReaderSource } from '../lib/reader';
+import { byChapter, chapterOf, readerKey, readerPath, type ReaderSource } from '../lib/reader';
 import { errorText, toast } from '../lib/store';
 import type { Annotation, Preferences, ReadingKind } from '../lib/types';
 import { themeColors, type ReaderHandle } from '../components/reader/common';
@@ -212,7 +212,7 @@ export default function Reader() {
   });
   const nextChapter = useMemo(() => {
     if (source?.type !== 'plugin' || !series.data?.videos) return null;
-    const vids = [...series.data.videos].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));
+    const vids = series.data.videos.filter((v) => !v.externalUrl).sort(byChapter);
     const i = vids.findIndex((v) => v.id === source.videoId);
     return i >= 0 ? (vids[i + 1] ?? null) : null;
   }, [series.data, source]);

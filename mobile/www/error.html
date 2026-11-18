@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Nova</title>
+    <link rel="stylesheet" href="shell.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Can't reach your Nova</h1>
+      <p class="lead" id="where">The server didn't answer. It may be offline, or this phone may be on another network.</p>
+      <div class="actions">
+        <button id="retry" type="button">Try again</button>
+        <button id="change" type="button" class="secondary">Use another server</button>
+      </div>
+    </main>
+    <script>
+      const saved = localStorage.getItem('nova.server');
+      if (saved) document.getElementById('where').textContent = `${saved.replace(/^https?:\/\//, '')} didn't answer. It may be offline, or this phone may be on another network.`;
+      document.getElementById('retry').onclick = () => (saved ? location.replace(saved) : location.replace('index.html'));
+      document.getElementById('change').onclick = () => location.replace('index.html?change=1');
+    </script>
+  </body>
+</html>

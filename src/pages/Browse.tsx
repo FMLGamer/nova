@@ -2,9 +2,11 @@ import { useMemo } from 'react';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import { api } from '../lib/api';
-import { HERO_HEIGHT, Hero, pickHero } from '../components/Hero';
+import { Hero, pickHero } from '../components/Hero';
 import { PosterGrid } from '../components/media';
 import { BrowseFilters, BrowseSection } from '../components/BrowseSection';
+import { HeroSkeleton, PageLayout } from '../components/PageLayout';
+import { AiringRail, ContinueRail, ForYouRail, MyListRail, TrendingRows, UpNextRail } from '../components/Sections';
 
 const SORTS = [
   { value: 'popularity.desc', label: 'Popular' },
@@ -41,32 +43,40 @@ export function Browse({ kind }: { kind: 'movies' | 'shows' }) {
   const items = q.data?.pages.flat() ?? [];
   const firstPage = q.data?.pages[0];
   const featured = useMemo(() => pickHero(firstPage), [firstPage]);
+  const type = kind === 'movies' ? 'movie' : 'tv';
 
   return (
-    <div>
-      <h1 className="sr-only">{kind === 'movies' ? 'Movies' : 'Shows'}</h1>
-      {featured ? (
-        <Hero item={featured} compact eyebrow={kind === 'movies' ? 'Featured film' : 'Featured series'} />
-      ) : (
-        q.isLoading && <div className={`${HERO_HEIGHT.compact} skeleton`} />
-      )}
-      <BrowseSection
-        top={!featured && !q.isLoading}
-        className={featured || q.isLoading ? 'mt-12' : undefined}
-        title={kind === 'movies' ? 'Browse movies' : 'Browse shows'}
-        filters={
-          <BrowseFilters
-            sort={sort as (typeof SORTS)[number]['value']}
-            sorts={SORTS}
-            onSort={(v) => set('sort', v === 'popularity.desc' ? '' : v)}
-            genre={genre}
-            genres={(genres.data ?? []).map((g) => ({ value: String(g.id), label: g.name }))}
-            onGenre={(v) => set('genre', v)}
-          />
-        }
-      >
-        <PosterGrid items={items} loading={q.isLoading || q.isFetchingNextPage} done={!q.hasNextPage} onEnd={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()} />
-      </BrowseSection>
-    </div>
+    <PageLayout
+      page={kind}
+      title={kind === 'movies' ? 'Movies' : 'Shows'}
+      hero={(size) =>
+        featured ? <Hero item={featured} size={size} eyebrow={kind === 'movies' ? 'Featured film' : 'Featured series'} /> : q.isLoading ? <HeroSkeleton size={size} /> : null
+      }
+      sections={{
+        continue: <ContinueRail type={type} />,
+        upnext: <UpNextRail type={type} />,
+        airing: <AiringRail type={type} />,
+        mylist: <MyListRail type={type} />,
+        foryou: <ForYouRail type={type} />,
+        trending: <TrendingRows ids={kind === 'movies' ? ['trending-movies', 'now-playing', 'top-movies'] : ['trending-tv', 'popular-tv', 'on-the-air']} />,
+        browse: (
+          <BrowseSection
+            title={kind === 'movies' ? 'Browse movies' : 'Browse shows'}
+            filters={
+              <BrowseFilters
+                sort={sort as (typeof SORTS)[number]['value']}
+                sorts={SORTS}
+                onSort={(v) => set('sort', v === 'popularity.desc' ? '' : v)}
+                genre={genre}
+                genres={(genres.data ?? []).map((g) => ({ value: String(g.id), label: g.name }))}
+                onGenre={(v) => set('genre', v)}
+              />
+            }
+          >
+            <PosterGrid items={items} loading={q.isLoading || q.isFetchingNextPage} done={!q.hasNextPage} onEnd={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()} />
+          </BrowseSection>
+        ),
+      }}
+    />
   );
 }

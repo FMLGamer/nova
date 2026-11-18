@@ -27,6 +27,10 @@
   --color-warn: #fbbf24;
   --color-bad: #f87171;
   --color-progress: #e5182f;
+  /* Tailwind's own palette is wide-gamut (oklch); on HDR screens that reads as neon. The few used stay sRGB. */
+  --color-amber-300: #fcd34d;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
 
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
@@ -68,6 +72,21 @@ html {
   text-rendering: optimizeLegibility;
   color-scheme: dark;
   scrollbar-color: var(--color-ink-600) transparent;
+  /* The interface is standard range: HDR artwork never outshines the page. */
+  dynamic-range-limit: standard;
+}
+
+/* ...except the player's picture, which may use all of an HDR screen (HDR video, RTX Video HDR). */
+.hdr-video {
+  dynamic-range-limit: no-limit;
+}
+
+/* Next to an HDR picture the controls go full white on a deeper shade, so they don't look grey. */
+.hdr-ui [class*='text-white/'] {
+  color: #fff;
+}
+.hdr-ui .player-scrim {
+  --tw-gradient-from: rgb(0 0 0 / 0.97);
 }
 
 body {

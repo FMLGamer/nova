@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Nova</title>
+    <link rel="stylesheet" href="shell.css" />
+  </head>
+  <body>
+    <main>
+      <svg class="logo" viewBox="0 0 512 512" aria-hidden="true">
+        <defs>
+          <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#a78bfa" />
+            <stop offset="0.55" stop-color="#f472b6" />
+            <stop offset="1" stop-color="#fb923c" />
+          </linearGradient>
+        </defs>
+        <path d="M256 92c10 74 34 120 72 146 22 15 50 22 92 18-42 4-70 12-92 28-38 26-62 72-72 136-10-64-34-110-72-136-22-16-50-24-92-28 42 4 70-3 92-18 38-26 62-72 72-146z" fill="url(#g)" />
+      </svg>
+      <h1>Connect to your Nova</h1>
+      <p class="lead">Enter the address of your Nova server, the same one you open in a browser.</p>
+      <form id="form" novalidate>
+        <input id="url" type="url" inputmode="url" autocomplete="url" autocapitalize="off" spellcheck="false" placeholder="https://nova.example.com" required />
+        <button id="go" type="submit">Connect</button>
+      </form>
+      <p id="error" class="error" role="alert" hidden></p>
+      <div id="recent" class="recent" hidden>
+        <h2>Recent servers</h2>
+        <ul id="list"></ul>
+      </div>
+    </main>
+    <script src="shell.js"></script>
+    <script>
+      const KEY = 'nova.server';
+      const RECENT = 'nova.recent';
+      const params = new URLSearchParams(location.search);
+      const saved = localStorage.getItem(KEY);
+      // Straight to the server unless the user asked to pick another one.
+      if (saved && !params.has('change')) location.replace(saved);
+
+      const input = document.getElementById('url');
+      const button = document.getElementById('go');
+      const error = document.getElementById('error');
+      const recent = JSON.parse(localStorage.getItem(RECENT) || '[]');
+      if (saved) input.value = saved;
+
+      const list = document.getElementById('list');
+      for (const url of recent) {
+        const li = document.createElement('li');
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = url.replace(/^https?:\/\//, '');
+        b.onclick = () => connect(url);
+        li.append(b);
+        list.append(li);
+      }
+      document.getElementById('recent').hidden = !recent.length;
+
+      function normalise(value) {
+        let v = value.trim().replace(/\/+$/, '');
+        if (!v) return null;
+        if (!/^https?:\/\//i.test(v)) v = (/^(\d{1,3}\.){3}\d{1,3}(:\d+)?$|^localhost(:\d+)?$|\.local(:\d+)?$/i.test(v) ? 'http://' : 'https://') + v;
+        try {
+          const u = new URL(v);
+          return u.origin + u.pathname.replace(/\/+$/, '');
+        } catch {
+          return null;
+        }
+      }
+
+      async function connect(value) {
+        const url = normalise(value);
+        error.hidden = true;
+        if (!url) {
+          error.textContent = "That doesn't look like a web address.";
+          error.hidden = false;
+          return;
+        }
+        button.disabled = true;
+        button.textContent = 'Connecting…';
+        const ok = await novaShell.isNova(url);
+        button.disabled = false;
+        button.textContent = 'Connect';
+        if (!ok) {
+          error.textContent = `No Nova server answered at ${url}. Check the address, and that this phone can reach it.`;
+          error.hidden = false;
+          return;
+        }
+        localStorage.setItem(KEY, url);
+        localStorage.setItem(RECENT, JSON.stringify([url, ...recent.filter((r) => r !== url)].slice(0, 5)));
+        location.replace(url);
+      }
+
+      document.getElementById('form').addEventListener('submit', (e) => {
+        e.preventDefault();
+        connect(input.value);
+      });
+    </script>
+  </body>
+</html>

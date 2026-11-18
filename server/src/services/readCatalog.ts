@@ -3,11 +3,11 @@
  * novels from AniList, books from Open Library. Reading itself comes from the library, reading folders
  * and plugins (the title page looks for the title there).
  */
+import { anilistQuery } from '../lib/anilist.js';
 import { cached } from '../lib/cache.js';
 import { HttpError } from '../lib/http.js';
 import { fetchJson, stripHtml } from '../lib/upstream.js';
 
-const ANILIST = 'https://graphql.anilist.co';
 const OPENLIB = 'https://openlibrary.org';
 const COVERS = 'https://covers.openlibrary.org/b/id';
 const GUTENDEX = 'https://gutendex.com';
@@ -76,13 +76,7 @@ const FIELDS = `id idMal title { romaji english native } description(asHtml: fal
   staff(sort: RELEVANCE, perPage: 3) { edges { role node { name { full } } } }`;
 
 async function anilist<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const r = await fetchJson<{ data: T }>(ANILIST, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ query, variables }),
-    timeoutMs: 12_000,
-  });
-  return r.data;
+  return anilistQuery<T>(query, variables);
 }
 
 const formatOf = (m: AniManga): ReadFormat =>
@@ -259,6 +253,29 @@ export function freeEdition(title: string, author: string | null): Promise<strin
 }
 
 // ---------------------------------------------------------------- entry points
+
+/** Manga, novels and books matching a title (manga first: that's what plugins can read). */
+export function readSearch(text: string): Promise<ReadItem[]> {
+  const query = text.trim().slice(0, 100);
+  if (query.length < 2) return Promise.resolve([]);
+  return cached(`read:search:${query.toLowerCase()}`, HOUR, async () => {
+    const [manga, books] = await Promise.all([
+      anilist<{ Page: { media: AniManga[] } }>(
+        `query ($q: String) { Page(perPage: 15) { media(type: MANGA, search: $q, isAdult: false, sort: SEARCH_MATCH) { ${FIELDS} } } }`,
+        { q: query },
+      )
+        .then((d) => d.Page.media.filter((m) => m.coverImage?.large).map(mapManga))
+        .catch(() => [] as ReadItem[]),
+      fetchJson<{ docs?: OlDoc[] }>(
+        `${OPENLIB}/search.json?${new URLSearchParams({ q: query, limit: '12', fields: 'key,title,author_name,first_publish_year,cover_i,subject,ratings_average' })}`,
+        { timeoutMs: 15_000 },
+      )
+        .then((r) => (r.docs ?? []).filter((d) => d.cover_i).map(mapBook))
+        .catch(() => [] as ReadItem[]),
+    ]);
+    return [...manga, ...books];
+  });
+}
 
 export function readBrowse(opts: { format?: string; sort?: string; genre?: string; page?: number }): Promise<ReadItem[]> {
   const format = (['manga', 'manhwa', 'manhua', 'novel', 'oneshot', 'book'] as const).find((f) => f === opts.format) ?? 'manga';

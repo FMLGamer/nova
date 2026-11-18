@@ -1,13 +1,14 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, BookOpen, CalendarDays, Clapperboard, CornerDownLeft, Film, House, Library, Radio, Search, Settings, Shield, Sparkles, Swords, Tv } from 'lucide-react';
+import { ArrowRight, BookOpen, CalendarDays, Clapperboard, CornerDownLeft, Film, House, Library, Radio, Search, Settings, Shield, Sparkles, Swords, Tv, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { cls, kindLabel, titlePath } from '../lib/format';
 import { useContributions, useSession } from '../lib/queries';
 import { toast, useApp } from '../lib/store';
+import { FORMAT_LABEL, readTitlePath } from './ReadCard';
 
 interface Entry {
   id: string;
@@ -28,6 +29,26 @@ function useDebounced<T>(value: T, ms: number): T {
   return v;
 }
 
+export type ScopeId = 'movies' | 'shows' | 'anime' | 'read';
+export interface SearchScope {
+  id: ScopeId;
+  label: string;
+}
+const SCOPE_LABEL: Record<ScopeId, string> = { movies: 'Movies', shows: 'Shows', anime: 'Anime', read: 'Manga & books' };
+
+/** Searching from a tab searches that tab's kind of media first. */
+export function searchScope(pathname: string): SearchScope | null {
+  const m = /^\/(movies|shows|anime|read)(\/|$)/.exec(pathname);
+  return m ? { id: m[1] as ScopeId, label: SCOPE_LABEL[m[1] as ScopeId] } : null;
+}
+
+/** Plugin catalogue types that belong to a scope. */
+function scopeHasType(scope: SearchScope | null, type: string, reader: string | undefined): boolean {
+  if (!scope) return true;
+  if (scope.id === 'read') return reader === 'comic' || reader === 'book' || type === 'manga' || type === 'comic' || type === 'book';
+  return scope.id === 'movies' ? type === 'movie' : scope.id === 'shows' ? type === 'series' || type === 'tv' : type === 'anime';
+}
+
 export function CommandPalette() {
   const open = useApp((s) => s.palette);
   const setOpen = useApp((s) => s.setPalette);
@@ -39,22 +60,27 @@ export function CommandPalette() {
 
 function Palette({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
+  const [scope, setScope] = useState(() => searchScope(location.pathname));
   const query = useDebounced(q.trim(), 220);
   const listRef = useRef<HTMLDivElement>(null);
   const { data: session } = useSession();
   const { data: contrib } = useContributions();
   const openAssistant = useApp((s) => s.openAssistant);
+  const readerOf = (type: string) => contrib?.mediaTypes.find((m) => m.id === type)?.reader;
+  const catalogs = (contrib?.searchCatalogs ?? []).filter((c) => scopeHasType(scope, c.type, readerOf(c.type)));
 
-  const search = useQuery({ queryKey: ['palette-search', query], queryFn: () => api.catalog.search(query), enabled: query.length >= 2, staleTime: 60_000 });
+  const search = useQuery({ queryKey: ['palette-search', query], queryFn: () => api.catalog.search(query), enabled: query.length >= 2 && scope?.id !== 'read', staleTime: 60_000 });
+  const readSearch = useQuery({ queryKey: ['palette-read-search', query], queryFn: () => api.catalog.readSearch(query), enabled: query.length >= 2 && scope?.id === 'read', staleTime: 60_000 });
   const pluginSearch = useQuery({
-    queryKey: ['palette-plugin-search', query, contrib?.searchCatalogs.length],
-    enabled: query.length >= 2 && Boolean(contrib?.searchCatalogs.length),
+    queryKey: ['palette-plugin-search', query, scope?.id ?? 'all', catalogs.length],
+    enabled: query.length >= 2 && Boolean(catalogs.length),
     staleTime: 60_000,
     queryFn: async () => {
       const results = await Promise.all(
-        (contrib?.searchCatalogs ?? []).slice(0, 4).map((c) =>
+        catalogs.slice(0, 4).map((c) =>
           api.plugins
             .catalog(c.pluginId, c.type, c.id, { search: query })
             .then((metas) => metas.slice(0, 4).map((m) => ({ meta: m, catalog: c })))
@@ -75,7 +101,12 @@ function Palette({ onClose }: { onClose: () => void }) {
     const ql = q.trim().toLowerCase();
     const s = search.data;
     if (s) {
-      const all = [...s.movies.slice(0, 4), ...s.shows.slice(0, 4), ...s.anime.slice(0, 4)];
+      const per = scope ? 10 : 4;
+      const all = [
+        ...(!scope || scope.id === 'movies' ? s.movies.slice(0, per) : []),
+        ...(!scope || scope.id === 'shows' ? s.shows.slice(0, per) : []),
+        ...(!scope || scope.id === 'anime' ? s.anime.slice(0, per) : []),
+      ];
       for (const it of all) {
         out.push({
           id: it.id,
@@ -86,6 +117,16 @@ function Palette({ onClose }: { onClose: () => void }) {
           run: go(titlePath(it.id)),
         });
       }
+    }
+    for (const it of readSearch.data?.slice(0, 12) ?? []) {
+      out.push({
+        id: it.id,
+        group: 'Titles',
+        label: it.title,
+        hint: [FORMAT_LABEL[it.format], it.author ?? it.year].filter(Boolean).join(' · '),
+        image: it.poster,
+        run: go(readTitlePath(it.id)),
+      });
     }
     for (const r of pluginSearch.data ?? []) {
       out.push({
@@ -98,7 +139,7 @@ function Palette({ onClose }: { onClose: () => void }) {
       });
     }
     if (ql.length >= 2) {
-      out.push({ id: 'all', group: 'Titles', label: `See all results for “${q.trim()}”`, icon: <ArrowRight className="size-4" />, run: go(`/search?q=${encodeURIComponent(q.trim())}`) });
+      out.push({ id: 'all', group: 'Titles', label: `See all results for “${q.trim()}”`, icon: <ArrowRight className="size-4" />, run: go(`/search?${new URLSearchParams({ q: q.trim(), ...(scope ? { type: scope.id } : {}) })}`) });
     }
     const pages: Entry[] = [
       { id: 'home', group: 'Go to', label: 'Home', icon: <House className="size-4" />, run: go('/') },
@@ -148,7 +189,7 @@ function Palette({ onClose }: { onClose: () => void }) {
     out.push(...pages.filter((p) => !ql || p.label.toLowerCase().includes(ql) || p.group === 'Actions'));
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search.data, pluginSearch.data, q, session, contrib]);
+  }, [search.data, readSearch.data, pluginSearch.data, q, session, contrib, scope]);
 
   useEffect(() => setSel(0), [q]);
   useEffect(() => {
@@ -157,6 +198,7 @@ function Palette({ onClose }: { onClose: () => void }) {
 
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') onClose();
+    else if (e.key === 'Backspace' && !q && scope) setScope(null);
     else if (e.key === 'ArrowDown') {
       e.preventDefault();
       setSel((s) => Math.min(entries.length - 1, s + 1));
@@ -182,16 +224,26 @@ function Palette({ onClose }: { onClose: () => void }) {
         className="glass-strong relative flex h-fit max-h-[72vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl shadow-[0_40px_120px_-20px_rgb(0_0_0/0.9)]"
       >
         <div className="flex items-center gap-3 border-b border-line px-5">
-          <Search className="size-5 text-muted" />
+          <Search className="size-5 shrink-0 text-muted" />
+          {scope && (
+            <button
+              onClick={() => setScope(null)}
+              title="Only searching here. Click (or Backspace) to search everything."
+              className="flex shrink-0 items-center gap-1.5 rounded-full bg-accent/15 py-1 pr-2 pl-3 text-xs font-semibold text-fg ring-1 ring-accent/35 transition hover:bg-accent/25"
+            >
+              In {scope.label}
+              <X className="size-3.5 opacity-70" />
+            </button>
+          )}
           <input
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}
-            placeholder="Search titles, jump anywhere, run an action…"
-            className="h-16 flex-1 bg-transparent text-[17px] placeholder:text-faint focus:outline-none"
+            placeholder={scope ? `Search ${scope.label.toLowerCase()}…` : 'Search titles, jump anywhere, run an action…'}
+            className="h-16 min-w-0 flex-1 bg-transparent text-[17px] placeholder:text-faint focus:outline-none"
           />
-          {(search.isFetching || pluginSearch.isFetching) && <span className="size-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />}
+          {(search.isFetching || readSearch.isFetching || pluginSearch.isFetching) && <span className="size-4 animate-spin rounded-full border-2 border-white/20 border-t-white/70" />}
           <kbd className="rounded-md bg-white/8 px-1.5 py-0.5 text-[11px] text-faint">Esc</kbd>
         </div>
         <div ref={listRef} className="overflow-y-auto p-2">
@@ -225,8 +277,15 @@ function Palette({ onClose }: { onClose: () => void }) {
               </div>
             );
           })}
-          {query.length >= 2 && search.isSuccess && !entries.some((e) => e.group === 'Titles' && e.id !== 'all') && (
-            <div className="px-3 py-6 text-center text-sm text-muted">No titles match “{query}”.</div>
+          {query.length >= 2 && (search.isSuccess || readSearch.isSuccess) && !entries.some((e) => e.group === 'Titles' && e.id !== 'all') && (
+            <div className="px-3 py-6 text-center text-sm text-muted">
+              No titles match “{query}”{scope ? ` in ${scope.label}` : ''}.
+              {scope && (
+                <button onClick={() => setScope(null)} className="ml-1 font-semibold text-fg underline">
+                  Search everything
+                </button>
+              )}
+            </div>
           )}
         </div>
       </motion.div>

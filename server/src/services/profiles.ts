@@ -95,6 +95,8 @@ export const DEFAULT_PREFERENCES = {
     subtitleIgnore: ['signs & songs', 'signs/songs', 'signs and songs', 'forced'] as string[],
     // Player keyboard shortcuts that differ from the defaults (action -> key).
     shortcuts: {} as Record<string, string>,
+    // Top-bar tabs this profile never uses (movies | shows | anime | live | read | music).
+    navHidden: [] as string[],
   },
   reader: {
     typeface: 'literata', // literata | atkinson | dyslexic | serif | sans
@@ -110,12 +112,22 @@ export const DEFAULT_PREFERENCES = {
     comicFit: 'height', // height | width | original
   },
   home: {
-    // Section order for this profile's Home; unknown ids are ignored.
+    // Legacy Home order (before per-page layouts); read once into layout.home.
     sections: [
       'hero', 'continue', 'upnext', 'collections', 'live', 'reading', 'mylist',
       'foryou', 'trending', 'because', 'new', 'airing',
     ] as string[],
     hidden: [] as string[],
+  },
+  // Per page (home | movies | shows | anime | read): only what the profile changed. The sections each
+  // page offers, and which are on by default, live in the web app (src/lib/layout.ts).
+  layout: {} as Record<string, { sections?: string[] | null; removed?: string[]; hero?: boolean; heroSize?: string | null }>,
+  // Previews of features still being shaped; all off until switched on in Settings → Beta.
+  beta: {
+    // The anime schedule can show a whole month.
+    monthSchedule: false,
+    // Series cards show how many episodes you've watched.
+    episodeCounts: false,
   },
 };
 
@@ -244,10 +256,30 @@ export function migrateTorrentPrefs(torrent: Record<string, unknown> | undefined
   return out;
 }
 
+const LEGACY_HOME = ['hero', 'continue', 'upnext', 'collections', 'live', 'reading', 'mylist', 'trending', 'because', 'new', 'airing'];
+
+/**
+ * Home used to keep its own order + hidden list, saved in full for every profile. Untouched ones get the
+ * new defaults (which leave out Up next); customised ones keep exactly what they had.
+ */
+function migrateHome(data: Record<string, unknown>): Record<string, unknown> {
+  const layout = (isPlainObject(data.layout) ? data.layout : {}) as Record<string, unknown>;
+  const home = data.home as { sections?: string[]; hidden?: string[] } | undefined;
+  if (layout.home || !home?.sections) return data;
+  const hidden = home.hidden ?? [];
+  const sections = home.sections.filter((s) => s !== 'foryou');
+  const untouched = !hidden.length && sections.length === LEGACY_HOME.length && sections.every((s, i) => s === LEGACY_HOME[i]);
+  if (untouched) return data;
+  return {
+    ...data,
+    layout: { ...layout, home: { sections: home.sections.filter((s) => s !== 'hero' && !hidden.includes(s)), removed: hidden.filter((s) => s !== 'hero'), hero: !hidden.includes('hero') } },
+  };
+}
+
 function storedPreferences(profileId: string): Record<string, unknown> {
   const row = db.prepare('SELECT data FROM preferences WHERE profile_id = ?').get(profileId) as { data: string } | undefined;
   const data = (row ? safeJson(row.data) : {}) as Record<string, unknown>;
-  return isPlainObject(data) ? { ...data, torrent: migrateTorrentPrefs(data.torrent as Record<string, unknown> | undefined) } : {};
+  return isPlainObject(data) ? migrateHome({ ...data, torrent: migrateTorrentPrefs(data.torrent as Record<string, unknown> | undefined) }) : {};
 }
 
 export function getPreferences(profileId: string): typeof DEFAULT_PREFERENCES {

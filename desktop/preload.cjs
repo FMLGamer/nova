@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('novaDesktop', {
   platform: process.platform,
   info: () => ipcRenderer.invoke('nova:info'),
   setSettings: (patch) => ipcRenderer.invoke('nova:settings', patch),
+  relaunch: () => ipcRenderer.invoke('nova:relaunch'),
   checkForUpdates: () => ipcRenderer.invoke('nova:update:check'),
   installUpdate: () => ipcRenderer.invoke('nova:update:install'),
   onUpdate: (cb) => {

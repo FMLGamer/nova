@@ -1,10 +1,11 @@
 # Nova: guide for AI agents and contributors
 
-Nova is a self-hosted media app with three parts:
+Nova is a self-hosted media app with four parts:
 
 - **Frontend:** a React PWA in `src/`.
 - **Server:** Express + SQLite in `server/`.
 - **Desktop app:** an Electron shell for Windows, macOS and Linux in `desktop/` that runs that same server locally.
+- **Android app:** a Capacitor shell in `mobile/` that opens the user's Nova server (the frontend, served by it).
 
 ## Architecture
 
@@ -50,8 +51,19 @@ Nova is a self-hosted media app with three parts:
   (`thread()`, sanitized client-side with DOMPurify in `ThreadView`). App credentials are integrations.
 - **Read catalogue** (`services/readCatalog.ts`): AniList MANGA (manga/manhwa/manhua/novel/one-shot) and Open Library
   (books); `/read/:kind/:id` pages find sources in the server library and plugin search catalogues.
-- **Recommendations** (`services/recommend.ts`): genre/seed scoring over watch history; dismissals in `rec_dismissed`.
-  Stats: `services/stats.ts`.
+- **Recommendations** (`services/recommend.ts`): genre/seed scoring over watch history and the tracker lists (anything
+  on them but "planning" is left out); dismissals in `rec_dismissed`. Stats: `services/stats.ts`.
+- **AniList** is always called through `lib/anilist.ts` (`anilistQuery`): a queue under the reported rate limit, 429s
+  wait for `Retry-After`, identical requests in flight are shared. `lib/cache.ts` `cached()` also shares concurrent
+  misses. Don't call graphql.anilist.co directly.
+- **History import** (`services/historyImport.ts`, `POST /api/me/import`): Netflix / Letterboxd / generic CSV, parsed,
+  matched (TMDB search, AniList for anime; episodes by name), written as finished `watch_progress` rows dated when they
+  were watched (`ON CONFLICT DO NOTHING`). Runs as an in-memory background job the client polls.
+- **Page layouts** (`src/lib/layout.ts`): which sections each page (home, movies, shows, anime, live, read) offers and
+  which are on by default; the profile's changes are `prefs.layout[page]` ({sections, removed, hero, heroSize}).
+  Pages render through `components/PageLayout.tsx` with the shared rows in `components/Sections.tsx` (most take a
+  media `type`). A new section = a registry entry + its node in the page's `sections` map.
+- **Beta features** live in `prefs.beta` and default to off; they're switched on under Settings → Beta.
 - **Matroska:**
   - `server/src/media/matroska.ts` reads tracks, chapters and attachments from the header. It pulls subtitle blocks from
     the clusters near a time, using Cues.
@@ -68,7 +80,12 @@ Nova is a self-hosted media app with three parts:
 - **Desktop shell** (`desktop/main.cjs`): window state in `window-state.json`, a transparent title bar overlay (the
   web UI pads its top bar with `wco-pad` and marks drag areas with `app-drag`), `preload.cjs` exposing
   `window.novaDesktop` (only to Nova's own origin), electron-updater for the NSIS installer and AppImage, and Discord
-  status (`discord.cjs`, app ID from `build-info.json` written at stage time from `DISCORD_CLIENT_ID`).
+  status (`discord.cjs`, app ID from `build-info.json` written at stage time from `DISCORD_CLIENT_ID`). The server's port
+  comes from `desktop-settings.json` (`port`, default 11471).
+- **Android shell** (`mobile/`): `www/` is a small local connect page (remembers the server in localStorage, checks
+  `/healthz` through CapacitorHttp) that then navigates the WebView to the server. The web app recognises the shell by
+  `NovaAndroid` in the user agent (`src/lib/mobile.ts`). `android/` is the committed native project; `cap sync` copies
+  `www` in. The UI keeps a dark sRGB look: `html` has `dynamic-range-limit: standard`, only the player's video is HDR.
 
 ## Conventions
 
@@ -83,7 +100,10 @@ Nova is a self-hosted media app with three parts:
 ## Release
 
 - Pushing to `main` builds `ghcr.io/<owner>/nova:latest` (target `server`) and `:client` (target `client`).
-- Tagging `v*` also builds the desktop apps (Windows installer/zip/portable, macOS dmg/zip, Linux AppImage/tar.gz) on a
-  three-OS matrix and attaches them, with the auto-update metadata (`latest*.yml`), to the GitHub release.
-- Bump the version in `package.json`, `server/package.json`, `desktop/package.json` and `VERSION` in
-  `server/src/routes/system.ts`.
+- Tagging `v*` also runs the Apps workflow: the desktop apps (Windows installer/zip/portable, macOS dmg/zip, Linux
+  AppImage/tar.gz) on a three-OS matrix and the Android APK (signed with the `NOVA_ANDROID_*` secrets), attached with the
+  auto-update metadata (`latest*.yml`) to the GitHub release. The release text is the version's section of
+  `CHANGELOG.md`.
+- Every release adds a section to `CHANGELOG.md` (New / Changed / Fixed, in user terms).
+- Bump the version in `package.json`, `server/package.json`, `desktop/package.json`, `mobile/package.json` and `VERSION`
+  in `server/src/routes/system.ts`.

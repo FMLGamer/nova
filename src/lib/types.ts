@@ -185,6 +185,7 @@ export interface Preferences {
     customCss: string;
     subtitleIgnore: string[];
     shortcuts: Record<string, string>;
+    navHidden: string[];
   };
   reader: {
     typeface: 'literata' | 'atkinson' | 'dyslexic' | 'serif' | 'sans';
@@ -203,6 +204,34 @@ export interface Preferences {
     sections: string[];
     hidden: string[];
   };
+  layout: Record<string, PageLayoutPrefs>;
+  beta: {
+    monthSchedule: boolean;
+    episodeCounts: boolean;
+  };
+}
+
+export type HeroSize = 'small' | 'medium' | 'large' | 'full';
+
+export interface ImportJob {
+  id: string;
+  source: 'netflix' | 'letterboxd' | 'generic';
+  state: 'running' | 'done' | 'failed';
+  total: number;
+  done: number;
+  movies: number;
+  episodes: number;
+  shows: number;
+  unmatched: string[];
+  error: string | null;
+}
+
+/** A page's layout as far as the profile changed it (see src/lib/layout.ts for the defaults). */
+export interface PageLayoutPrefs {
+  sections?: string[] | null;
+  removed?: string[];
+  hero?: boolean;
+  heroSize?: HeroSize | null;
 }
 
 export type DeepPartial<T> = { [K in keyof T]?: T[K] extends object ? (T[K] extends unknown[] ? T[K] : DeepPartial<T[K]>) : T[K] };
@@ -241,6 +270,7 @@ export interface WatchedSummary {
   mediaId: string;
   started: number;
   finished: number;
+  watchedEpisodes: number[];
   lastPercent: number;
   lastSeason: number | null;
   lastEpisode: number | null;
@@ -833,7 +863,7 @@ export interface MetaPreview {
 }
 
 export interface Meta extends MetaPreview {
-  videos?: { id: string; title: string; released?: string; season?: number; episode?: number; thumbnail?: string; overview?: string }[];
+  videos?: { id: string; title: string; released?: string; season?: number; episode?: number; thumbnail?: string; overview?: string; externalUrl?: string }[];
   runtime?: string;
   cast?: string[];
   director?: string[];

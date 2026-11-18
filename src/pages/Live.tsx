@@ -5,7 +5,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { History, Maximize, PictureInPicture2, Play, Radio, Search, Star, Volume2, VolumeX } from 'lucide-react';
 import { api } from '../lib/api';
 import { cls, fmtAirTime } from '../lib/format';
-import { useSession } from '../lib/queries';
+import { pageLayout } from '../lib/layout';
+import { usePrefs, useSession } from '../lib/queries';
 import { errorText, toast } from '../lib/store';
 import type { Channel, LivePlay, Programme } from '../lib/types';
 import { Spotlight } from '../components/Hero';
@@ -94,6 +95,7 @@ export default function Live() {
   const qc = useQueryClient();
   const { data: session } = useSession();
   const channels = useQuery({ queryKey: ['live-channels'], queryFn: () => api.live.channels() });
+  const { data: prefs } = usePrefs();
   const [windowStart] = useState(() => {
     const d = new Date();
     d.setMinutes(d.getMinutes() < 30 ? 0 : 30, 0, 0);
@@ -186,10 +188,14 @@ export default function Live() {
   const nextUp = play?.channel.epgId ? byEpg.get(play.channel.epgId)?.find((p) => p.start >= now) : undefined;
   const hours = Array.from({ length: 9 }, (_, i) => windowStart + i * 3600);
 
+  const banner = pageLayout('live', prefs);
+  const showSpotlight = spotlight && banner.hero;
+
   return (
-    <div className={spotlight ? '' : 'pt-20'}>
-      {spotlight && (
+    <div className={showSpotlight ? '' : 'pt-24 sm:pt-28'}>
+      {showSpotlight && (
         <Spotlight
+          size={banner.heroSize}
           backdrop={spotlight.p?.image}
           art={spotlight.c.logo}
           eyebrow={

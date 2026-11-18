@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, ListChecks } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, retryUpstream } from '../lib/api';
 import { cls, kindLabel, titlePath } from '../lib/format';
 import { errorText } from '../lib/store';
 import type { TrackStatus } from '../lib/types';
@@ -18,7 +18,7 @@ export function TrackerLists() {
   const status = useQuery({ queryKey: ['trackers'], queryFn: api.trackers.status, staleTime: 5 * 60_000 });
   const connected = Boolean(status.data?.anilist.connected || status.data?.mal.connected);
   const [kind, setKind] = useState<'anime' | 'manga'>('anime');
-  const lists = useQuery({ queryKey: ['tracker-lists', kind], queryFn: () => api.trackers.lists(kind), enabled: connected, staleTime: 60_000 });
+  const lists = useQuery({ queryKey: ['tracker-lists', kind], queryFn: () => api.trackers.lists(kind), enabled: connected, staleTime: 60_000, retry: retryUpstream });
   const [tab, setTab] = useState<TrackStatus>('watching');
   const counts = useMemo(() => new Map(STATUS.map((s) => [s, (lists.data ?? []).filter((i) => i.status === s).length])), [lists.data]);
   if (status.isLoading) return <Spinner />;

@@ -16,7 +16,7 @@ import { HttpError } from '../lib/http.js';
 import { asyncHandler } from '../lib/async.js';
 import { cached, forget } from '../lib/cache.js';
 
-export const VERSION = '2.4.0';
+export const VERSION = '2.5.0';
 
 export const systemRouter = Router();
 

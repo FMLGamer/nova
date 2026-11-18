@@ -20,6 +20,7 @@ Nova ships no content sources of its own. Everything that finds or fetches media
 | **Nova desktop app** | For Windows, macOS and Linux: installer, `.zip`/`.tar.gz`, portable `.exe` or AppImage. Everything runs on your computer, with no account or setup. | Your computer |
 | **Docker: `nova:latest`** | Multi-user server with invite-only accounts. | The server |
 | **Docker: `nova:client`** | Same server, but it never joins a torrent swarm. | Each viewer's device, through the desktop app or the browser |
+| **Nova for Android** | The app for phones and tablets: it opens your Nova server (any of the above). | Wherever that server streams |
 
 ### Nova desktop app
 
@@ -43,6 +44,16 @@ The Windows installer and the AppImage download new versions in the background a
 
 The app also works as a local streaming engine for `nova:client` servers. When such a site wants to play a torrent, Nova asks
 you once whether to allow it. Allowed sites are listed under **Settings → Account & sharing**.
+
+Nova's server inside the app listens on `127.0.0.1:11471`; pick another port under **Settings → About Nova → Server**.
+
+### Nova for Android
+
+Download `Nova-x.y.z-android.apk` from [Releases](https://github.com/FMLGamer/nova/releases) and install it (Android 7
+or newer; allow installing from your browser or file manager when asked). Enter the address of your Nova server, the same
+one you open in a browser, for example `https://nova.example.com` or `http://192.168.1.20:3000`. The app is Nova's own
+web interface in a native window, so it is always as new as your server; **Settings → About Nova → Switch server**
+connects to another one.
 
 ### Docker
 
@@ -85,6 +96,8 @@ priority:
 | Variable | Default | Purpose |
 |---|---|---|
 | `TORRENT_MODE` | `server` | `client` = never touch torrents; viewers' devices stream them |
+| `PORT` / `HOST` | `3000` / `0.0.0.0` | Where the server listens |
+| `ENGINE_PORT` | `11471` | Port browsers try for a viewer's desktop app (`nova:client`) |
 | `PUBLIC_URL` | request host | Base for share links and external-player links |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | `admin` / generated | First-boot admin |
 | `SESSION_SECRET` | generated in `/data` | Signing key for sessions |
@@ -146,8 +159,11 @@ Back up `/data`. Everything else can be rebuilt.
   - Your lists are under **Library → Anime & manga**. The anime schedule can show only what you're watching.
   - Episode discussion threads open inside Nova.
 - **For you:** recommendations on Home, built from what you watch and finish, plus a **Stats** page in your library.
-- **Make it yours:** hide spoilers (titles and thumbnails of episodes you haven't seen), hide scores, custom CSS, filler
-  episodes marked, and Discord status in the desktop app.
+- **Bring your history:** import what you watched on Netflix (Viewing activity → Download all), Letterboxd or any CSV
+  of titles (Settings → Profile); it's matched to the catalogue and marked watched.
+- **Make it yours:** choose the sections of every page, their order and the banner size (Settings → Customize), hide
+  spoilers (titles and thumbnails of episodes you haven't seen), hide scores, custom CSS, filler episodes marked, and
+  Discord status in the desktop app. Features still being shaped wait under Settings → Beta.
 - **Live TV:** M3U, Xtream, Stalker/Ministra and HDHomeRun inputs, the iptv-org directory and an XMLTV guide.
 - **People:** invite-only accounts, profiles, expiring guest links, and watch rooms with chat.
 - **Plugins:**
@@ -168,11 +184,18 @@ for. The installer, archives and portable app end up in `desktop/release/`. For 
 at https://discord.com/developers/applications and set its ID as `DISCORD_CLIENT_ID` when building (in CI: a repository
 variable of that name); without it the Discord option stays hidden.
 
+The Android app lives in `mobile/` (Capacitor): `npm --prefix mobile install`, then in `mobile/` run `npx cap sync android`
+and build `mobile/android` with Android Studio or `./gradlew assembleRelease -PnovaVersion=x.y.z` (JDK 21 and the Android
+SDK). CI signs it with the key in the `NOVA_ANDROID_*` repository secrets.
+
 The project layout:
 
 - `src/`: the React app.
 - `server/src/`: the API, plugin host, streaming and the Matroska reader.
 - `desktop/`: the Electron shell.
+- `mobile/`: the Android shell.
+
+What changed in each release is in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

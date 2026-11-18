@@ -2,9 +2,9 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, retryUpstream } from '../lib/api';
 import { errorText, toast } from '../lib/store';
-import type { TrackEntry, TrackStatus } from '../lib/types';
+import type { TrackedShow, TrackEntry, TrackStatus } from '../lib/types';
 import { Button, Chip, Input, Modal, Slider, Spinner } from './ui';
 
 type Kind = 'anime' | 'manga';
@@ -23,7 +23,23 @@ export function useTrackersConnected() {
 }
 
 export function useTrackEntry(mediaId: string | null, enabled: boolean) {
-  return useQuery({ queryKey: ['track-entry', mediaId], queryFn: () => api.trackers.entry(mediaId!), enabled: Boolean(enabled && mediaId), staleTime: 60_000, retry: false });
+  return useQuery({ queryKey: ['track-entry', mediaId], queryFn: () => api.trackers.entry(mediaId!), enabled: Boolean(enabled && mediaId), staleTime: 60_000, retry: retryUpstream });
+}
+
+const NO_TRACKED = new Map<string, TrackedShow>();
+
+/** The connected lists' anime by Nova id (empty without a tracker), for watched marks on cards and in the schedule. */
+export function useTrackedAnime(): Map<string, TrackedShow> {
+  const connected = useTrackersConnected();
+  const { data } = useQuery({
+    queryKey: ['tracker-lists', 'anime'],
+    queryFn: () => api.trackers.lists('anime'),
+    enabled: connected,
+    staleTime: 5 * 60_000,
+    retry: retryUpstream,
+    select: (items) => new Map(items.map((i) => [i.mediaId, i])),
+  });
+  return data ?? NO_TRACKED;
 }
 
 export function TrackingModal({ mediaId, total: knownTotal, kind, onClose }: { mediaId: string; total: number | null; kind: Kind; onClose: () => void }) {

@@ -1,5 +1,6 @@
+import { anilistQuery } from '../lib/anilist.js';
 import { cached } from '../lib/cache.js';
-import { fetchJson, stripHtml } from '../lib/upstream.js';
+import { stripHtml } from '../lib/upstream.js';
 import type {
   AiringEntry,
   CatalogDetail,
@@ -9,7 +10,6 @@ import type {
   Relation,
 } from '../media/types.js';
 
-const ENDPOINT = 'https://graphql.anilist.co';
 const DAY = 24 * 60 * 60 * 1000;
 
 interface AniTitle {
@@ -53,14 +53,7 @@ const MEDIA_FIELDS = `
 `;
 
 async function anilist<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-  const body = JSON.stringify({ query, variables });
-  const data = await fetchJson<{ data: T }>(ENDPOINT, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body,
-    timeoutMs: 12_000,
-  });
-  return data.data;
+  return anilistQuery<T>(query, variables);
 }
 
 function mapAni(m: AniMedia): CatalogItem {
@@ -232,6 +225,7 @@ export async function anilistEpisodes(id: string): Promise<Episode[]> {
           coverImage { large }
           streamingEpisodes { title thumbnail }
         }
+        Page(perPage: 30) { airingSchedules(mediaId: $id, sort: TIME_DESC) { episode airingAt } }
       }`;
     const data = await anilist<{
       Media: {
@@ -240,8 +234,10 @@ export async function anilistEpisodes(id: string): Promise<Episode[]> {
         coverImage: { large: string | null } | null;
         streamingEpisodes: { title: string | null; thumbnail: string | null }[] | null;
       };
+      Page: { airingSchedules: { episode: number; airingAt: number }[] } | null;
     }>(gql, { id: Number(id) });
     const m = data.Media;
+    const airs = new Map((data.Page?.airingSchedules ?? []).map((s) => [s.episode, new Date(s.airingAt * 1000).toISOString()]));
     const streaming = m.streamingEpisodes ?? [];
     // AniList's streamingEpisodes are unordered; map each to its real episode
     // number parsed from the title (e.g. "Episode 12 - ...") and fall back to order.
@@ -266,7 +262,7 @@ export async function anilistEpisodes(id: string): Promise<Episode[]> {
         title: cleaned && cleaned.length ? cleaned : `Episode ${n}`,
         overview: '',
         still: se?.thumbnail ?? cover,
-        airDate: null,
+        airDate: airs.get(n) ?? null,
         runtime: null,
       });
     }
@@ -365,13 +361,17 @@ export async function anilistAiring(ids: string[], fromSec: number, toSec: numbe
   });
 }
 
-export async function anilistRecent(): Promise<CatalogItem[]> {
-  return cached('anilist:recent', 30 * 60 * 1000, async () => {
+const RECENT_PAGE = 24;
+
+/** Titles with an episode out in the past week, newest first; `page` (1-based) of RECENT_PAGE. */
+export async function anilistRecent(page = 1): Promise<CatalogItem[]> {
+  const all = await cached('anilist:recent-week', 30 * 60 * 1000, async () => {
     const now = Math.floor(Date.now() / 1000);
     const start = now - 7 * 24 * 60 * 60;
     const gql = `
-      query ($start: Int, $end: Int) {
-        Page(page: 1, perPage: 50) {
+      query ($start: Int, $end: Int, $page: Int) {
+        Page(page: $page, perPage: 50) {
+          pageInfo { hasNextPage }
           airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME_DESC) {
             media {
               ${MEDIA_FIELDS}
@@ -380,18 +380,23 @@ export async function anilistRecent(): Promise<CatalogItem[]> {
           }
         }
       }`;
-    const data = await anilist<{
-      Page: { airingSchedules: { media: AniMedia & { isAdult?: boolean } }[] };
-    }>(gql, { start, end: now });
     const seen = new Set<number>();
     const out: CatalogItem[] = [];
-    for (const s of data.Page.airingSchedules) {
-      if (s.media.isAdult || !s.media.coverImage?.large || seen.has(s.media.id)) continue;
-      seen.add(s.media.id);
-      out.push(mapAni(s.media));
+    for (let p = 1; p <= 8; p++) {
+      const data = await anilist<{
+        Page: { pageInfo: { hasNextPage: boolean }; airingSchedules: { media: AniMedia & { isAdult?: boolean } }[] };
+      }>(gql, { start, end: now, page: p });
+      for (const s of data.Page.airingSchedules) {
+        if (s.media.isAdult || !s.media.coverImage?.large || seen.has(s.media.id)) continue;
+        seen.add(s.media.id);
+        out.push(mapAni(s.media));
+      }
+      if (!data.Page.pageInfo.hasNextPage) break;
     }
-    return out.slice(0, 24);
+    return out;
   });
+  const from = (Math.max(1, Math.trunc(page)) - 1) * RECENT_PAGE;
+  return all.slice(from, from + RECENT_PAGE);
 }
 
 export async function anilistSchedule(weekOffset = 0): Promise<AiringEntry[]> {

@@ -5,6 +5,7 @@
  */
 import crypto from 'node:crypto';
 import { db } from '../db/index.js';
+import { anilistQuery } from '../lib/anilist.js';
 import { cached, forget } from '../lib/cache.js';
 import { seal, signToken, unseal, verifyToken } from '../lib/crypto.js';
 import { HttpError } from '../lib/http.js';
@@ -41,7 +42,6 @@ interface AccountRow {
   avatar: string | null;
 }
 
-const ANILIST = 'https://graphql.anilist.co';
 const MAL_API = 'https://api.myanimelist.net/v2';
 const MAL_OAUTH = 'https://myanimelist.net/v1/oauth2';
 
@@ -87,17 +87,7 @@ async function request<T>(url: string, init: RequestInit, what: string): Promise
 // ---------------------------------------------------------------- AniList
 
 async function anilistGql<T>(query: string, variables: Record<string, unknown>, token?: string): Promise<T> {
-  const r = await request<{ data: T; errors?: { message: string }[] }>(
-    ANILIST,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-      body: JSON.stringify({ query, variables }),
-    },
-    'AniList',
-  );
-  if (r.errors?.length) throw new HttpError(502, `AniList: ${r.errors[0]!.message}`);
-  return r.data;
+  return anilistQuery<T>(query, variables, { token });
 }
 
 /** AniList hands out year-long tokens (no refresh); the expiry is inside the JWT. */

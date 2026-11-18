@@ -46,7 +46,7 @@ function writeJson(file, value) {
 // ---------------------------------------------------------------- app settings
 
 const settingsFile = path.join(dataRoot, 'desktop-settings.json');
-const DEFAULT_SETTINGS = { autoUpdate: true, discord: false };
+const DEFAULT_SETTINGS = { autoUpdate: true, discord: false, port: null };
 let settings = readJson(settingsFile, DEFAULT_SETTINGS);
 
 function buildInfo() {
@@ -75,8 +75,10 @@ function portFree(p) {
   });
 }
 
+/** The port chosen in Settings, else the engine port Nova websites look for, else any free one. */
 async function pickPort() {
-  if (await portFree(ENGINE_PORT)) return ENGINE_PORT;
+  const wanted = Number.isInteger(settings.port) ? settings.port : ENGINE_PORT;
+  if (await portFree(wanted)) return wanted;
   return new Promise((resolve) => {
     const srv = net.createServer();
     srv.listen(0, '127.0.0.1', () => {
@@ -392,16 +394,24 @@ function queueActivity(a) {
 
 ipcMain.handle('nova:info', (e) => {
   if (!trusted(e)) return null;
-  return { version: app.getVersion(), platform: process.platform, settings, update: updateState, discordAvailable: Boolean(process.env.NOVA_DISCORD_CLIENT_ID || buildInfo().discordClientId) };
+  return { version: app.getVersion(), platform: process.platform, settings, port, update: updateState, discordAvailable: Boolean(process.env.NOVA_DISCORD_CLIENT_ID || buildInfo().discordClientId) };
 });
 ipcMain.handle('nova:settings', (e, patch) => {
   if (!trusted(e) || !patch || typeof patch !== 'object') return settings;
   if (typeof patch.autoUpdate === 'boolean') settings.autoUpdate = patch.autoUpdate;
   if (typeof patch.discord === 'boolean') settings.discord = patch.discord;
+  if (patch.port === null || (Number.isInteger(patch.port) && patch.port >= 1024 && patch.port <= 65535)) settings.port = patch.port;
   writeJson(settingsFile, settings);
   if (!settings.discord) discord();
   if (settings.autoUpdate) checkForUpdates();
   return settings;
+});
+ipcMain.handle('nova:relaunch', (e) => {
+  if (!trusted(e)) return false;
+  quitting = true;
+  app.relaunch();
+  app.quit();
+  return true;
 });
 ipcMain.handle('nova:update:check', (e) => {
   if (!trusted(e)) return null;

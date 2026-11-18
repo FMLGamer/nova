@@ -1,4 +1,4 @@
-name: Desktop apps
+name: Apps
 
 on:
   push:
@@ -54,14 +54,77 @@ jobs:
             desktop/release/latest*.yml
           if-no-files-found: error
 
+  # Nova for Android: the web shell in mobile/ (it opens the user's own Nova server), as a signed APK.
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install
+        run: npm --prefix mobile ci
+
+      - name: Copy the shell into the Android project
+        working-directory: mobile
+        run: npx cap sync android
+
+      # Signed with the project's key when the repository has it (secrets NOVA_ANDROID_*); else the debug key.
+      - name: Signing key
+        env:
+          KEYSTORE: ${{ secrets.NOVA_ANDROID_KEYSTORE }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then
+            echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/nova.keystore"
+            echo "NOVA_KEYSTORE=$RUNNER_TEMP/nova.keystore" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build
+        working-directory: mobile/android
+        env:
+          NOVA_KEYSTORE_PASSWORD: ${{ secrets.NOVA_ANDROID_KEYSTORE_PASSWORD }}
+          NOVA_KEY_ALIAS: ${{ secrets.NOVA_ANDROID_KEY_ALIAS }}
+          NOVA_KEY_PASSWORD: ${{ secrets.NOVA_ANDROID_KEY_PASSWORD }}
+        run: |
+          VERSION=$(node -p "require('../../package.json').version")
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease -PnovaVersion="$VERSION"
+          mkdir -p ../../release-android
+          cp app/build/outputs/apk/release/app-release.apk "../../release-android/Nova-$VERSION-android.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nova-android
+          path: release-android/Nova-*.apk
+          if-no-files-found: error
+
   release:
     # Attach whatever built, so one failing platform doesn't hold back the others.
     if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
-    needs: build
+    needs: [build, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
+      # The release text is this version's section of CHANGELOG.md.
+      - name: Release notes
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" '/^## /{p = index($0, "[" v "]") > 0; next} p' CHANGELOG.md > notes.md
+          [ -s notes.md ] || echo "See [CHANGELOG.md](CHANGELOG.md)." > notes.md
+
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -70,4 +133,5 @@ jobs:
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
+          body_path: notes.md
           files: dist/*

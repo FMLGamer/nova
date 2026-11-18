@@ -17,6 +17,7 @@ import {
   reorderCollection,
   updateCollection,
 } from '../services/collections.js';
+import { importJob, startImport } from '../services/historyImport.js';
 import { listNotifications, markNotificationsRead } from '../services/notifications.js';
 import { getPreferences } from '../services/profiles.js';
 import { dismiss as dismissRecommendation, recommendations } from '../services/recommend.js';
@@ -95,6 +96,16 @@ meRouter.post('/recommendations/dismiss', (req, res) => {
   const { mediaId } = parse(z.object({ mediaId: z.string().min(3).max(200) }), req.body);
   dismissRecommendation(req.profile!.id, mediaId);
   res.json({ ok: true });
+});
+
+/** Viewing history from another service (a Netflix or Letterboxd CSV export). Runs in the background. */
+meRouter.post('/import', (req, res) => {
+  const { csv } = parse(z.object({ csv: z.string().min(5).max(20_000_000) }), req.body);
+  res.status(202).json({ job: startImport(req.profile!.id, csv) });
+});
+
+meRouter.get('/import/:id', (req, res) => {
+  res.json({ job: importJob(req.profile!.id, req.params.id) });
 });
 
 meRouter.get('/history', (req, res) => {

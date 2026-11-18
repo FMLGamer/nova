@@ -2,18 +2,20 @@ import { motion } from 'motion/react';
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, KeyRound, Link2, Palette, Play, Plus, Sparkles, Subtitles, Trash2, UserRound, House, Gauge, BookOpen, Info, ListChecks } from 'lucide-react';
+import { Copy, FlaskConical, KeyRound, LayoutGrid, Link2, Palette, Play, Plus, Sparkles, Subtitles, Trash2, UserRound, Gauge, BookOpen, Info, ListChecks } from 'lucide-react';
 import { api } from '../lib/api';
-import { cls, homeSectionOrder, LANGUAGES, relTime, reportIssueUrl } from '../lib/format';
+import { cls, LANGUAGES, relTime, reportIssueUrl } from '../lib/format';
 import { useAppConfig, usePrefs, useProfile, useSavePrefs, useSession } from '../lib/queries';
 import { READING_FONTS } from '../lib/reading-fonts';
 import { errorText, toast } from '../lib/store';
-import { PLATFORM_NAME, desktop, useDesktopInfo, type DesktopSettings } from '../lib/desktop';
+import { PLATFORM_NAME, desktop, useDesktopInfo, type DesktopInfo, type DesktopSettings } from '../lib/desktop';
+import { androidApp, switchServer } from '../lib/mobile';
 import type { AssistantProvider, Preferences, SubtitleStyle } from '../lib/types';
 import { Avatar, Badge, Button, Card, Chip, Input, Row, Segmented, Select, Slider, Spinner, Switch, TextArea } from '../components/ui';
 import { cueStyle } from '../components/player/subtitles';
 import { SHORTCUTS, keyLabel, shortcutMap } from '../components/player/shortcuts';
 import { ProfileEditor } from './Profiles';
+import { BetaSection, CustomizeSection, ImportHistory } from './SettingsCustomize';
 import { themeColors } from '../components/reader/common';
 
 const SECTIONS = [
@@ -22,11 +24,12 @@ const SECTIONS = [
   { id: 'subtitles', label: 'Subtitles', icon: Subtitles },
   { id: 'sources', label: 'Sources & quality', icon: Gauge },
   { id: 'reading', label: 'Reading', icon: BookOpen },
-  { id: 'home', label: 'Home screen', icon: House },
+  { id: 'customize', label: 'Customize', icon: LayoutGrid },
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'assistant', label: 'Assistant', icon: Sparkles },
   { id: 'account', label: 'Account & sharing', icon: KeyRound },
   { id: 'tracking', label: 'Anime & manga tracking', icon: ListChecks },
+  { id: 'beta', label: 'Beta', icon: FlaskConical },
   { id: 'about', label: 'About Nova', icon: Info },
 ];
 
@@ -91,6 +94,7 @@ function ProfileSection() {
           <span className="text-sm text-muted">{session.profiles.length}</span>
         </Row>
       </Group>
+      <ImportHistory />
       {editing && <ProfileEditor profile={profile} onClose={() => setEditing(false)} />}
     </>
   );
@@ -164,7 +168,10 @@ function PlaybackSection({ p, set }: { p: Preferences; set: (x: object) => void 
         </Row>
       </Group>
       <Group title="Picture">
-        <Row label="Enhancement" hint="Runs on your GPU in the browser. Anime4K sharpens line art; deband smooths gradients.">
+        <Row
+          label="Enhancement"
+          hint="Runs on your GPU in the browser. Anime4K sharpens line art; deband smooths gradients. With None, the graphics driver's own upscaling and HDR (NVIDIA RTX Video) can work on the picture instead."
+        >
           <Select value={ui.enhance} onChange={(e) => set({ ui: { enhance: e.target.value } })} className="w-40">
             <option value="none">Off</option>
             <option value="sharpen">Sharpen</option>
@@ -416,54 +423,6 @@ function ReadingSection({ p, set }: { p: Preferences; set: (x: object) => void }
         </Row>
       </Group>
     </>
-  );
-}
-
-const HOME_LABELS: Record<string, string> = {
-  hero: 'Featured banner',
-  continue: 'Continue watching',
-  upnext: 'Up next',
-  collections: 'Pinned collections',
-  live: 'Live TV favourites',
-  reading: 'Keep reading',
-  mylist: 'My List',
-  foryou: 'For you',
-  trending: 'Trending & popular',
-  because: 'Because you watched',
-  new: 'Fresh episodes',
-  airing: 'Airing this week',
-};
-
-function HomeSection({ p, set }: { p: Preferences; set: (x: object) => void }) {
-  const order = homeSectionOrder(p.home.sections);
-  const hidden = new Set(p.home.hidden);
-  const move = (i: number, d: number) => {
-    const next = [...order];
-    const [x] = next.splice(i, 1);
-    next.splice(i + d, 0, x!);
-    set({ home: { sections: next } });
-  };
-  return (
-    <Group title="Your Home screen" hint="Reorder sections or hide what you never use. Pinned collections and plugin catalogues fill in automatically.">
-      {order.map((id, i) => (
-        <motion.div layout key={id} className="flex items-center gap-3 py-2.5">
-          <span className={cls('flex-1 text-sm', hidden.has(id) && 'text-faint line-through')}>{HOME_LABELS[id] ?? id}</span>
-          <button disabled={i === 0} onClick={() => move(i, -1)} aria-label="Move up" className="rounded-lg p-1.5 text-muted hover:bg-white/8 disabled:opacity-30">
-            <ArrowUp className="size-4" />
-          </button>
-          <button disabled={i === order.length - 1} onClick={() => move(i, 1)} aria-label="Move down" className="rounded-lg p-1.5 text-muted hover:bg-white/8 disabled:opacity-30">
-            <ArrowDown className="size-4" />
-          </button>
-          <button
-            onClick={() => set({ home: { hidden: hidden.has(id) ? p.home.hidden.filter((x) => x !== id) : [...p.home.hidden, id] } })}
-            aria-label={hidden.has(id) ? 'Show' : 'Hide'}
-            className="rounded-lg p-1.5 text-muted hover:bg-white/8"
-          >
-            {hidden.has(id) ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-          </button>
-        </motion.div>
-      ))}
-    </Group>
   );
 }
 
@@ -920,7 +879,14 @@ function AboutSection({ p, set }: { p?: Preferences; set: (x: object) => void })
     <>
       <Group title="About Nova" hint="Nova is open source. Found a bug or missing something? Let us know.">
         <Row label="Version">{cfg.version}</Row>
-        <Row label="Running as">{cfg.mode === 'desktop' ? (PLATFORM_NAME[desktop?.platform ?? ''] ?? 'Desktop app') : 'Server'}</Row>
+        <Row label="Running as">{cfg.mode === 'desktop' ? (PLATFORM_NAME[desktop?.platform ?? ''] ?? 'Desktop app') : androidApp ? 'Android app' : 'Server'}</Row>
+        {androidApp && (
+          <Row label="Server" hint={location.host}>
+            <Button size="sm" onClick={switchServer}>
+              Switch server
+            </Button>
+          </Row>
+        )}
         <Row label="Report a problem" hint="Opens a new issue with your Nova version and browser already filled in.">
           {link(reportIssueUrl(cfg), 'Report')}
         </Row>
@@ -951,7 +917,44 @@ function AboutSection({ p, set }: { p?: Preferences; set: (x: object) => void })
           </Row>
         </Group>
       )}
+      {info && <PortRow info={info} save={(port) => setDesktop({ port })} />}
     </>
+  );
+}
+
+/** Desktop: which port Nova's own server uses on this computer. */
+function PortRow({ info, save }: { info: DesktopInfo; save: (port: number | null) => Promise<void> }) {
+  const [value, setValue] = useState(String(info.settings.port ?? ''));
+  const wanted = value.trim() ? Number(value) : null;
+  const valid = wanted === null || (Number.isInteger(wanted) && wanted >= 1024 && wanted <= 65535);
+  const changed = wanted !== (info.settings.port ?? null);
+  return (
+    <Group title="Server" hint="Nova runs a small server on this computer that this window talks to.">
+      <Row
+        label="Port"
+        hint={
+          <>
+            Right now <code className="rounded bg-white/8 px-1">http://127.0.0.1:{info.port}</code>. Leave it empty for the usual 11471: Nova websites that stream through this app look for it there.
+          </>
+        }
+      >
+        <div className="flex items-center gap-2">
+          <Input value={value} onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ''))} placeholder="11471" inputMode="numeric" className="w-24 text-center" aria-label="Port" />
+          <Button
+            size="sm"
+            variant="white"
+            disabled={!valid || !changed}
+            onClick={async () => {
+              await save(wanted);
+              await desktop?.relaunch?.();
+            }}
+          >
+            Save & restart
+          </Button>
+        </div>
+      </Row>
+      {!valid && <p className="pb-3 text-xs text-bad">Use a number from 1024 to 65535.</p>}
+    </Group>
   );
 }
 
@@ -960,7 +963,7 @@ export default function Settings() {
   const { data: prefs } = usePrefs();
   const save = useSavePrefs();
   const set = (x: object) => save.mutate(x);
-  const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]!;
+  const active = SECTIONS.find((s) => s.id === (section === 'home' ? 'customize' : section)) ?? SECTIONS[0]!;
 
   return (
     <div className="px-5 pt-24 sm:px-10 sm:pt-28">
@@ -989,7 +992,8 @@ export default function Settings() {
           {prefs && active.id === 'subtitles' && <SubtitlesSection p={prefs} set={set} />}
           {prefs && active.id === 'sources' && <SourcesSection p={prefs} set={set} />}
           {prefs && active.id === 'reading' && <ReadingSection p={prefs} set={set} />}
-          {prefs && active.id === 'home' && <HomeSection p={prefs} set={set} />}
+          {prefs && active.id === 'customize' && <CustomizeSection p={prefs} set={set} />}
+          {prefs && active.id === 'beta' && <BetaSection p={prefs} set={set} />}
           {prefs && active.id === 'appearance' && <AppearanceSection p={prefs} set={set} />}
         </motion.div>
       </div>

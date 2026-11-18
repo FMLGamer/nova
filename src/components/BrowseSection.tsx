@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cls } from '../lib/format';
+import { useDragScroll } from '../lib/dragScroll';
 import { Chip, Menu, MenuItem, Segmented } from './ui';
 
 export interface FilterOption<T extends string = string> {
@@ -13,6 +14,7 @@ const FADE = 40;
 /** One line of chips: arrows and the mouse wheel scroll it, edges fade, the active chip stays in view. */
 export function ChipStrip({ children, className }: { children: ReactNode; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
+  useDragScroll(ref);
   const [edges, setEdges] = useState({ left: false, right: false });
   const update = () => {
     const el = ref.current;

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { useNavigate } from 'react-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { BookOpen, Headphones, HardDrive, Search } from 'lucide-react';
 import { api } from '../lib/api';
@@ -7,14 +7,15 @@ import { resolveAudio, useAudio } from '../lib/audio';
 import { useContributions, usePrefs, useSession } from '../lib/queries';
 import { readerPath } from '../lib/reader';
 import { errorText, toast } from '../lib/store';
-import type { Book, LibraryFile, LibraryItem, ReadFormat } from '../lib/types';
+import type { Book, HeroSize, LibraryFile, LibraryItem, ReadFormat } from '../lib/types';
 import { Rail, RailSkeleton } from '../components/media';
 import { Spotlight } from '../components/Hero';
 import { BrowseFilters, BrowseSection, FilterMenu } from '../components/BrowseSection';
+import { HeroSkeleton, PageLayout } from '../components/PageLayout';
 import { FORMAT_LABEL, ReadGrid, readTitlePath } from '../components/ReadCard';
+import { PluginRails, ReadingRail } from '../components/Sections';
 import { Badge, Button, Modal, Spinner } from '../components/ui';
 import { useFilterParams } from './Browse';
-import { PluginRail } from './PluginMeta';
 
 function Cover({ src, title, badge }: { src: string | null; title: string; badge?: React.ReactNode }) {
   const [broken, setBroken] = useState(false);
@@ -276,10 +277,8 @@ export default function Read() {
   const comics = useQuery({ queryKey: ['server-items', 'comic'], queryFn: () => api.server.items({ kind: 'comic' }), retry: false });
   const manga = useQuery({ queryKey: ['server-items', 'manga'], queryFn: () => api.server.items({ kind: 'manga' }), retry: false });
   const readable = new Set(['manga', 'comic', 'book', ...(contrib?.mediaTypes.filter((m) => m.reader === 'comic' || m.reader === 'book').map((m) => m.id) ?? [])]);
-  const pluginCatalogs = (contrib?.catalogs ?? []).filter((c) => readable.has(c.type));
   const freeBooks = Boolean(session?.settings.musicBooksEnabled && prefs?.ui.musicAndBooks);
   const reading = (progress.data ?? []).filter((r) => r.percent < 0.99);
-  const finished = (progress.data ?? []).filter((r) => r.percent >= 0.99);
   const navigate = useNavigate();
   const [series, setSeries] = useState<{ item: LibraryItem; files: LibraryFile[] } | null>(null);
   const shelf = useMemo(() => [...(books.data ?? []), ...(comics.data ?? []), ...(manga.data ?? [])], [books.data, comics.data, manga.data]);
@@ -291,118 +290,99 @@ export default function Read() {
     return pool.length ? pool[Math.floor(Math.random() * pool.length)]! : null;
   }, [trending.data]);
 
+  const hero = (size: HeroSize) =>
+    current ? (
+      <Spotlight
+        size={size}
+        art={current.cover}
+        eyebrow="Keep reading"
+        title={current.title ?? 'Untitled'}
+        meta={
+          <>
+            {current.author && <span>{current.author}</span>}
+            <span className="flex items-center gap-2">
+              <span className="h-1 w-24 overflow-hidden rounded-full bg-white/15">
+                <span className="block h-full bg-progress" style={{ width: `${current.percent * 100}%` }} />
+              </span>
+              {Math.round(current.percent * 100)}%
+            </span>
+          </>
+        }
+        actions={
+          <Button variant="white" icon={<BookOpen className="size-5" />} onClick={() => navigate(`/reader?key=${encodeURIComponent(current.itemKey)}`)}>
+            Continue reading
+          </Button>
+        }
+      />
+    ) : featuredShelf ? (
+      <Spotlight
+        size={size}
+        backdrop={featuredShelf.backdrop}
+        art={featuredShelf.poster}
+        eyebrow={featuredShelf.kind === 'book' ? 'From your books' : featuredShelf.kind === 'manga' ? 'From your manga' : 'From your comics'}
+        title={featuredShelf.title}
+        meta={featuredShelf.fileCount > 1 ? <span>{featuredShelf.fileCount} files</span> : featuredShelf.year ? <span>{featuredShelf.year}</span> : undefined}
+        description={featuredShelf.overview}
+        actions={
+          <Button
+            variant="white"
+            icon={<BookOpen className="size-5" />}
+            onClick={() => openServerItem(featuredShelf, navigate, (files) => setSeries({ item: featuredShelf, files })).catch((e) => toast(errorText(e), 'bad'))}
+          >
+            Start reading
+          </Button>
+        }
+      />
+    ) : featuredCatalog ? (
+      <Spotlight
+        size={size}
+        backdrop={featuredCatalog.backdrop}
+        art={featuredCatalog.poster}
+        eyebrow={`Trending ${FORMAT_LABEL[featuredCatalog.format].toLowerCase()}`}
+        title={featuredCatalog.title}
+        meta={[featuredCatalog.author, featuredCatalog.year].filter(Boolean).length ? <span>{[featuredCatalog.author, featuredCatalog.year].filter(Boolean).join(' · ')}</span> : undefined}
+        description={featuredCatalog.overview}
+        actions={
+          <Button variant="white" icon={<BookOpen className="size-5" />} onClick={() => navigate(readTitlePath(featuredCatalog.id))}>
+            Details
+          </Button>
+        }
+      />
+    ) : progress.isLoading || trending.isLoading ? (
+      <HeroSkeleton size={size} />
+    ) : null;
+
+  const shelfRail = (items: LibraryItem[] | undefined, label: string) =>
+    items?.length ? (
+      <Rail title={<span className="flex items-center gap-2"><HardDrive className="size-5 text-accent" /> {label}</span>} dense>
+        {items.map((i) => (
+          <ServerItem key={i.id} item={i} />
+        ))}
+      </Rail>
+    ) : null;
+
   return (
-    <div className="space-y-12 pb-10">
-      <div>
-        {current ? (
-          <Spotlight
-            art={current.cover}
-            eyebrow="Keep reading"
-            title={current.title ?? 'Untitled'}
-            meta={
-              <>
-                {current.author && <span>{current.author}</span>}
-                <span className="flex items-center gap-2">
-                  <span className="h-1 w-24 overflow-hidden rounded-full bg-white/15">
-                    <span className="block h-full bg-progress" style={{ width: `${current.percent * 100}%` }} />
-                  </span>
-                  {Math.round(current.percent * 100)}%
-                </span>
-              </>
-            }
-            actions={
-              <Button variant="white" icon={<BookOpen className="size-5" />} onClick={() => navigate(`/reader?key=${encodeURIComponent(current.itemKey)}`)}>
-                Continue reading
-              </Button>
-            }
-          />
-        ) : featuredShelf ? (
-          <Spotlight
-            backdrop={featuredShelf.backdrop}
-            art={featuredShelf.poster}
-            eyebrow={featuredShelf.kind === 'book' ? 'From your books' : featuredShelf.kind === 'manga' ? 'From your manga' : 'From your comics'}
-            title={featuredShelf.title}
-            meta={featuredShelf.fileCount > 1 ? <span>{featuredShelf.fileCount} files</span> : featuredShelf.year ? <span>{featuredShelf.year}</span> : undefined}
-            description={featuredShelf.overview}
-            actions={
-              <Button
-                variant="white"
-                icon={<BookOpen className="size-5" />}
-                onClick={() => openServerItem(featuredShelf, navigate, (files) => setSeries({ item: featuredShelf, files })).catch((e) => toast(errorText(e), 'bad'))}
-              >
-                Start reading
-              </Button>
-            }
-          />
-        ) : featuredCatalog ? (
-          <Spotlight
-            backdrop={featuredCatalog.backdrop}
-            art={featuredCatalog.poster}
-            eyebrow={`Trending ${FORMAT_LABEL[featuredCatalog.format].toLowerCase()}`}
-            title={featuredCatalog.title}
-            meta={[featuredCatalog.author, featuredCatalog.year].filter(Boolean).length ? <span>{[featuredCatalog.author, featuredCatalog.year].filter(Boolean).join(' · ')}</span> : undefined}
-            description={featuredCatalog.overview}
-            actions={
-              <Button variant="white" icon={<BookOpen className="size-5" />} onClick={() => navigate(readTitlePath(featuredCatalog.id))}>
-                Details
-              </Button>
-            }
-          />
-        ) : null}
-        {series && <VolumePicker item={series.item} files={series.files} onClose={() => setSeries(null)} />}
-        <h1 className="sr-only">Read</h1>
-        {!current && !featuredShelf && !featuredCatalog && <div className="h-20 sm:h-24" />}
-      </div>
-      {reading.length > 0 && (
-        <Rail title="Keep reading" dense>
-          {reading.map((r) => (
-            <Link key={r.itemKey} to={`/reader?key=${encodeURIComponent(r.itemKey)}`} className="group block">
-              <Cover src={r.cover} title={r.title ?? ''} />
-              <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/10">
-                <div className="h-full bg-progress" style={{ width: `${r.percent * 100}%` }} />
-              </div>
-              <div className="mt-1.5 truncate text-[13px] font-semibold">{r.title}</div>
-              <div className="truncate text-xs text-faint">{Math.round(r.percent * 100)}%</div>
-            </Link>
-          ))}
-        </Rail>
-      )}
-      {(books.data?.length ?? 0) > 0 && (
-        <Rail title={<span className="flex items-center gap-2"><HardDrive className="size-5 text-accent" /> Books on your server</span>} dense>
-          {books.data!.map((i) => (
-            <ServerItem key={i.id} item={i} />
-          ))}
-        </Rail>
-      )}
-      {(comics.data?.length ?? 0) > 0 && (
-        <Rail title={<span className="flex items-center gap-2"><HardDrive className="size-5 text-accent" /> Comics on your server</span>} dense>
-          {comics.data!.map((i) => (
-            <ServerItem key={i.id} item={i} />
-          ))}
-        </Rail>
-      )}
-      {(manga.data?.length ?? 0) > 0 && (
-        <Rail title={<span className="flex items-center gap-2"><HardDrive className="size-5 text-accent" /> Manga on your server</span>} dense>
-          {manga.data!.map((i) => (
-            <ServerItem key={i.id} item={i} />
-          ))}
-        </Rail>
-      )}
-      {pluginCatalogs.map((c) => (
-        <PluginRail key={`${c.pluginId}:${c.type}:${c.id}`} catalog={c} />
-      ))}
-      {freeBooks && <FreeBooks />}
-      {finished.length > 0 && (
-        <Rail title="Finished" dense>
-          {finished.map((r) => (
-            <Link key={r.itemKey} to={`/reader?key=${encodeURIComponent(r.itemKey)}`} className="group block opacity-80 hover:opacity-100">
-              <Cover src={r.cover} title={r.title ?? ''} />
-              <div className="mt-2 truncate text-[13px] font-semibold">{r.title}</div>
-            </Link>
-          ))}
-        </Rail>
-      )}
-      <BrowseRead />
-    </div>
+    <>
+      <PageLayout
+        page="read"
+        title="Read"
+        hero={hero}
+        sections={{
+          reading: <ReadingRail />,
+          server: (
+            <div className="space-y-12">
+              {shelfRail(books.data, 'Books on your server')}
+              {shelfRail(comics.data, 'Comics on your server')}
+              {shelfRail(manga.data, 'Manga on your server')}
+            </div>
+          ),
+          plugins: <PluginRails types={readable} limit={12} />,
+          freebooks: freeBooks ? <FreeBooks /> : null,
+          finished: <ReadingRail finished />,
+          browse: <BrowseRead />,
+        }}
+      />
+      {series && <VolumePicker item={series.item} files={series.files} onClose={() => setSeries(null)} />}
+    </>
   );
 }

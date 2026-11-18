@@ -7,7 +7,7 @@
  *    seeds point to rises; a sequel to something you finished rises more.
  * 3. A genre profile (time-weighted) adds the best-liked titles in your favourite genres, so it also
  *    works without a TMDB key (Cinemeta has no recommendations of its own).
- * Anything you've watched, saved or dismissed is left out.
+ * Anything you've watched, saved, dismissed or have on your AniList / MyAnimeList lists is left out.
  */
 import { db } from '../db/index.js';
 import { cached } from '../lib/cache.js';
@@ -15,6 +15,7 @@ import type { CatalogItem, Relation } from '../media/types.js';
 import { anilistBrowse } from './anilist.js';
 import { detailFor } from './catalog.js';
 import { tmdbBrowse, tmdbGenres } from './tmdb.js';
+import { trackedLists, trackerStatus } from './trackers.js';
 
 export interface Recommendation {
   item: CatalogItem;
@@ -73,10 +74,24 @@ async function genreFill(kind: 'movie' | 'tv' | 'anime', genre: string): Promise
 }
 
 export async function recommendations(profileId: string): Promise<{ forYou: Recommendation[]; because: { seed: { mediaId: string; title: string }; items: CatalogItem[] }[] }> {
-  const { seeds: top, seen } = seeds(profileId);
+  const { seeds: local, seen } = seeds(profileId);
   const dismissed = new Set((db.prepare('SELECT media_id FROM rec_dismissed WHERE profile_id = ?').all(profileId) as { media_id: string }[]).map((r) => r.media_id));
+  // Whatever is on the connected AniList / MyAnimeList lists is known already (only "Plan to watch" is still welcome),
+  // and what was finished or is being watched there says what the profile likes.
+  const status = trackerStatus(profileId);
+  const tracked = status.anilist.connected || status.mal.connected ? await trackedLists(profileId).catch(() => []) : [];
+  const bySeed = new Map(local.map((s) => [s.mediaId, s]));
+  for (const t of tracked) {
+    if (t.status === 'planning') continue;
+    seen.add(t.mediaId);
+    if (t.status === 'dropped' || bySeed.has(t.mediaId)) continue;
+    const liked = t.score ? t.score / 7 : 1;
+    const days = t.updatedAt ? Math.max(0, (Date.now() - t.updatedAt * 1000) / 86_400_000) : HALF_LIFE_DAYS;
+    bySeed.set(t.mediaId, { mediaId: t.mediaId, title: t.title, weight: (t.status === 'completed' ? 2 : 1) * liked * decay(days) });
+  }
+  const top = [...bySeed.values()].sort((a, b) => b.weight - a.weight).slice(0, 14);
   // Recomputed when the history changes, otherwise reused for half an hour.
-  const version = top.map((s) => `${s.mediaId}:${s.weight.toFixed(1)}`).join(',') + `|${dismissed.size}`;
+  const version = top.map((s) => `${s.mediaId}:${s.weight.toFixed(1)}`).join(',') + `|${dismissed.size}|${seen.size}`;
   return cached(`recs:${profileId}:${version}`, 30 * 60_000, async () => {
     const scores = new Map<string, { item: CatalogItem; score: number; reason: string; best: number }>();
     const genres = new Map<string, number>();
