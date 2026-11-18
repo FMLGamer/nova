@@ -1,11 +1,12 @@
 import { useMemo, type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Radio } from 'lucide-react';
+import { BookOpen, Radio, X } from 'lucide-react';
 import { api } from '../lib/api';
-import { episodeLabel, fmtAirTime, fmtLeft, greeting, titlePath, watchPath } from '../lib/format';
+import { episodeLabel, fmtAirTime, fmtLeft, greeting, homeSectionOrder, titlePath, watchPath } from '../lib/format';
 import { useCollections, useContinue, useContributions, useMyList, usePrefs, useProfile, useSession, useUpNext } from '../lib/queries';
-import type { CatalogItem, Row } from '../lib/types';
+import { useApp } from '../lib/store';
+import type { CatalogItem, Recommendations, Row } from '../lib/types';
 import { HERO_HEIGHT, Hero } from '../components/Hero';
 import { PosterCard, Rail, RailSkeleton, WideCard } from '../components/media';
 import { Empty } from '../components/ui';
@@ -162,17 +163,56 @@ function LiveRail() {
   );
 }
 
-function BecauseRail() {
-  const { data: cont } = useContinue();
-  const seed = cont?.[0];
-  const { data } = useQuery({ queryKey: ['because', seed?.mediaId], queryFn: () => api.catalog.because(seed!.mediaId), enabled: Boolean(seed) });
-  if (!data?.items.length) return null;
+function useRecommendations() {
+  const profileId = useApp((s) => s.profileId);
+  return useQuery({ queryKey: ['recommendations', profileId], queryFn: api.me.recommendations, enabled: Boolean(profileId), staleTime: 10 * 60_000, retry: false });
+}
+
+function ForYouRail() {
+  const qc = useQueryClient();
+  const profileId = useApp((s) => s.profileId);
+  const { data } = useRecommendations();
+  if (!data?.forYou.length) return null;
+  const dismiss = async (id: string) => {
+    qc.setQueryData<Recommendations>(['recommendations', profileId], (d) => (d ? { ...d, forYou: d.forYou.filter((r) => r.item.id !== id) } : d));
+    await api.me.dismissRecommendation(id).catch(() => undefined);
+  };
   return (
-    <Rail title={<>Because you watched <span className="text-gradient">{data.title}</span></>}>
-      {data.items.map((i) => (
-        <PosterCard key={i.id} item={i} />
+    <Rail title="For you">
+      {data.forYou.map((r) => (
+        <div key={r.item.id} className="group/rec relative">
+          <PosterCard item={r.item} hint={r.reason} />
+          <button
+            onClick={() => void dismiss(r.item.id)}
+            aria-label="Not interested"
+            title="Not interested"
+            className="absolute top-2 left-2 grid size-7 place-items-center rounded-full bg-black/60 text-white/80 opacity-0 backdrop-blur transition-opacity group-hover/rec:opacity-100 hover:text-white max-sm:opacity-100"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
       ))}
     </Rail>
+  );
+}
+
+function BecauseRail() {
+  const { data: recs, isLoading } = useRecommendations();
+  const { data: cont } = useContinue();
+  const seed = cont?.[0];
+  const fallback = !isLoading && !recs?.because.length;
+  const { data } = useQuery({ queryKey: ['because', seed?.mediaId], queryFn: () => api.catalog.because(seed!.mediaId), enabled: Boolean(seed && fallback) });
+  const rails = recs?.because.length ? recs.because.slice(0, 2).map((b) => ({ title: b.seed.title, items: b.items })) : data?.items.length ? [{ title: data.title, items: data.items }] : [];
+  return (
+    <>
+      {rails.map((r) => (
+        <Rail key={r.title} title={<>Because you watched <span className="text-gradient">{r.title}</span></>}>
+          {r.items.map((i) => (
+            <PosterCard key={i.id} item={i} />
+          ))}
+        </Rail>
+      ))}
+    </>
   );
 }
 
@@ -215,7 +255,7 @@ export function Home() {
   const { data: contrib } = useContributions();
   const profile = useProfile();
   const featured = useMemo(() => (rows ? pickFeatured(rows) : null), [rows]);
-  const order = prefs?.home.sections ?? ['hero', 'continue', 'upnext', 'collections', 'live', 'reading', 'mylist', 'trending', 'because', 'new', 'airing'];
+  const order = homeSectionOrder(prefs?.home.sections);
   const hidden = new Set(prefs?.home.hidden ?? []);
 
   const sections: Record<string, ReactNode> = {
@@ -225,6 +265,7 @@ export function Home() {
     live: <LiveRail key="live" />,
     reading: <ReadingRail key="reading" />,
     mylist: <MyListRail key="mylist" />,
+    foryou: <ForYouRail key="foryou" />,
     because: <BecauseRail key="because" />,
     new: <NewEpisodesRail key="new" />,
     airing: <AiringRail key="airing" />,

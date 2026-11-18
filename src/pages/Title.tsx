@@ -5,6 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Check,
   CheckCircle2,
+  ChevronRight,
   Download,
   ExternalLink,
   FolderPlus,
@@ -29,8 +30,10 @@ import { playIntent } from '../lib/intent';
 import { offlineSupported, useOffline } from '../lib/offline';
 import { useCollections, useContributions, useDetail, useEpisodes, useListToggle, useMediaProgress, usePrefs, useSession } from '../lib/queries';
 import { errorText, toast, useApp } from '../lib/store';
-import type { CatalogDetail, Episode, Progress, TrackEntry, TrackStatus } from '../lib/types';
+import type { CatalogDetail, Discussion, Episode, Progress } from '../lib/types';
 import { PosterCard, Rail } from '../components/media';
+import { ThreadView } from '../components/ThreadView';
+import { TrackingModal, trackStatusLabel, useTrackEntry, useTrackersConnected } from '../components/Tracking';
 import { Trailer } from '../components/Trailer';
 import { Avatar, Badge, Button, Chip, Empty, Input, Menu, MenuItem, Modal, Segmented, Spinner } from '../components/ui';
 
@@ -45,150 +48,72 @@ function IconAction({ label, onClick, children, active }: { label: string; onCli
   );
 }
 
-const TRACK_STATUS: { value: TrackStatus; label: string }[] = [
-  { value: 'watching', label: 'Watching' },
-  { value: 'completed', label: 'Completed' },
-  { value: 'planning', label: 'Plan to watch' },
-  { value: 'paused', label: 'On hold' },
-  { value: 'dropped', label: 'Dropped' },
-];
-
-function TrackingModal({ detail, onClose }: { detail: CatalogDetail; onClose: () => void }) {
-  const qc = useQueryClient();
-  const entry = useQuery({ queryKey: ['track-entry', detail.id], queryFn: () => api.trackers.entry(detail.id) });
-  const current = entry.data?.anilist ?? entry.data?.mal ?? null;
-  const [status, setStatus] = useState<TrackStatus | ''>('');
-  const [progress, setProgress] = useState(0);
-  const [saving, setSaving] = useState(false);
-  useEffect(() => {
-    if (!current) return;
-    setStatus(current.status ?? '');
-    setProgress(current.progress);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry.data]);
-  const total = entry.data?.episodes ?? detail.totalEpisodes ?? null;
-  const save = async () => {
-    setSaving(true);
-    try {
-      qc.setQueryData(['track-entry', detail.id], await api.trackers.setEntry(detail.id, { status: status || undefined, progress }));
-      toast('Your lists are updated', 'ok');
-      onClose();
-    } catch (e) {
-      toast(errorText(e), 'bad');
-    } finally {
-      setSaving(false);
-    }
-  };
-  const line = (site: string, e: TrackEntry | null | undefined) =>
-    e !== undefined && (
-      <div className="flex items-center justify-between gap-3 py-2 text-sm">
-        <span className="font-medium">{site}</span>
-        {e ? (
-          <a href={e.url} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-muted hover:text-fg">
-            {e.status ? TRACK_STATUS.find((s) => s.value === e.status)?.label : 'Not on your list'}
-            {e.progress ? ` · ${e.progress}${total ? ` / ${total}` : ''}` : ''}
-            <ExternalLink className="size-3.5" />
-          </a>
-        ) : (
-          <span className="text-faint">Not on MyAnimeList</span>
-        )}
-      </div>
-    );
-  return (
-    <Modal open onClose={onClose} title="Tracking">
-      <div className="px-6 pb-6">
-        {entry.isLoading ? (
-          <div className="grid h-24 place-items-center">
-            <Spinner />
-          </div>
-        ) : entry.error ? (
-          <p className="text-sm text-bad">{errorText(entry.error)}</p>
-        ) : (
-          <>
-            <div className="divide-y divide-line">
-              {line('AniList', entry.data?.anilist)}
-              {line('MyAnimeList', entry.data?.mal)}
-            </div>
-            <div className="mt-4 text-xs font-semibold tracking-wider text-faint uppercase">Status</div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {TRACK_STATUS.map((s) => (
-                <Chip key={s.value} active={status === s.value} onClick={() => setStatus(s.value)}>
-                  {s.label}
-                </Chip>
-              ))}
-            </div>
-            <div className="mt-4 text-xs font-semibold tracking-wider text-faint uppercase">Episodes watched</div>
-            <div className="mt-2 flex items-center gap-2">
-              <Button size="sm" onClick={() => setProgress((p) => Math.max(0, p - 1))} aria-label="One fewer">
-                −
-              </Button>
-              <Input
-                type="number"
-                min={0}
-                max={total ?? undefined}
-                value={progress}
-                onChange={(e) => setProgress(Math.max(0, Math.min(total ?? 100000, Number(e.target.value) || 0)))}
-                className="w-24 text-center"
-                aria-label="Episodes watched"
-              />
-              <Button size="sm" onClick={() => setProgress((p) => (total ? Math.min(total, p + 1) : p + 1))} aria-label="One more">
-                +
-              </Button>
-              {total && <span className="text-sm text-muted">of {total}</span>}
-            </div>
-            <div className="mt-6 flex justify-end">
-              <Button variant="white" loading={saving} onClick={save}>
-                Save to your lists
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
-    </Modal>
-  );
-}
-
 function TrackingAction({ detail }: { detail: CatalogDetail }) {
-  const trackers = useQuery({ queryKey: ['trackers'], queryFn: api.trackers.status, staleTime: 5 * 60_000 });
+  const connected = useTrackersConnected();
+  const entry = useTrackEntry(detail.mediaType === 'anime' ? detail.id : null, connected);
   const [open, setOpen] = useState(false);
-  if (detail.mediaType !== 'anime' || !(trackers.data?.anilist.connected || trackers.data?.mal.connected)) return null;
+  if (detail.mediaType !== 'anime' || !connected) return null;
+  const e = entry.data?.anilist ?? entry.data?.mal;
+  const label = e?.status ? trackStatusLabel(e.status) : 'Track';
   return (
     <>
-      <IconAction label="Tracking" onClick={() => setOpen(true)}>
+      <IconAction label={label} onClick={() => setOpen(true)} active={Boolean(e?.status)}>
         <ListChecks className="size-5" />
       </IconAction>
-      {open && <TrackingModal detail={detail} onClose={() => setOpen(false)} />}
+      {open && <TrackingModal mediaId={detail.id} total={detail.totalEpisodes} kind="anime" onClose={() => setOpen(false)} />}
     </>
   );
 }
 
-/** Episode discussion threads on AniList and MyAnimeList. */
+/** Episode discussion threads on AniList and MyAnimeList, read right here when the site allows it. */
 function DiscussModal({ detail, episode, onClose }: { detail: CatalogDetail; episode: number; onClose: () => void }) {
   const q = useQuery({ queryKey: ['discussions', detail.id, episode], queryFn: () => api.trackers.discussions(detail.id, episode), staleTime: 30 * 60_000 });
+  const [open, setOpen] = useState<Discussion['embed']>(null);
+  useEffect(() => {
+    // One thread to read: open it straight away.
+    const embeds = q.data?.filter((d) => d.embed) ?? [];
+    if (embeds.length === 1 && q.data!.length === 1) setOpen(embeds[0]!.embed);
+  }, [q.data]);
   return (
-    <Modal open onClose={onClose} title={`Episode ${episode} discussions`}>
-      <div className="space-y-1 px-4 pb-6">
-        {q.isLoading && (
-          <div className="grid h-20 place-items-center">
-            <Spinner />
-          </div>
-        )}
-        {q.error && <p className="px-2 text-sm text-bad">{errorText(q.error)}</p>}
-        {q.data?.map((d) => (
-          <a key={d.url} href={d.url} target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-white/6">
-            <MessagesSquare className="size-5 shrink-0 text-accent" />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium">{d.title}</span>
-              <span className="block text-xs text-faint">
-                {d.site}
-                {d.comments != null ? ` · ${d.comments} comment${d.comments === 1 ? '' : 's'}` : ''}
-              </span>
-            </span>
-            <ExternalLink className="size-4 text-faint" />
-          </a>
-        ))}
-        {q.data && !q.data.length && <p className="px-2 text-sm text-muted">No discussion threads found for this episode yet.</p>}
-      </div>
+    <Modal open onClose={onClose} title={`Episode ${episode} discussions`} wide={Boolean(open)}>
+      {open ? (
+        <ThreadView site={open.site} id={open.id} onBack={(q.data?.length ?? 0) > 1 ? () => setOpen(null) : undefined} />
+      ) : (
+        <div className="-mx-2 space-y-1">
+          {q.isLoading && (
+            <div className="grid h-20 place-items-center">
+              <Spinner />
+            </div>
+          )}
+          {q.error && <p className="px-2 text-sm text-bad">{errorText(q.error)}</p>}
+          {q.data?.map((d) => {
+            const body = (
+              <>
+                <MessagesSquare className="size-5 shrink-0 text-accent" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium">{d.title}</span>
+                  <span className="block text-xs text-faint">
+                    {d.site}
+                    {d.comments != null ? ` · ${d.comments} comment${d.comments === 1 ? '' : 's'}` : ''}
+                  </span>
+                </span>
+                {d.embed ? <ChevronRight className="size-4 text-faint" /> : <ExternalLink className="size-4 text-faint" />}
+              </>
+            );
+            const row = 'flex w-full items-center gap-3 rounded-xl px-2 py-2.5 text-left hover:bg-white/6';
+            return d.embed ? (
+              <button key={d.url} onClick={() => setOpen(d.embed)} className={row}>
+                {body}
+              </button>
+            ) : (
+              <a key={d.url} href={d.url} target="_blank" rel="noreferrer" className={row}>
+                {body}
+              </a>
+            );
+          })}
+          {q.data && !q.data.length && <p className="px-2 text-sm text-muted">No discussion threads found for this episode yet.</p>}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -430,7 +355,24 @@ function DownloadMenu({ detail, intentSeason, intentEpisode }: { detail: Catalog
   );
 }
 
-function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; detail: CatalogDetail; progress?: Progress; onServer: boolean; focused?: boolean }) {
+function EpisodeRow({
+  ep,
+  detail,
+  progress,
+  onServer,
+  focused,
+  trackedProgress,
+  hideSpoilers,
+}: {
+  ep: Episode;
+  detail: CatalogDetail;
+  progress?: Progress;
+  onServer: boolean;
+  focused?: boolean;
+  /** Episodes watched according to AniList / MyAnimeList (anime only). */
+  trackedProgress: number | null;
+  hideSpoilers: boolean;
+}) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const rowRef = useRef<HTMLDivElement>(null);
@@ -439,29 +381,40 @@ function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; 
     if (focused) rowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
   }, [focused]);
   const pct = progress?.durationSeconds ? progress.positionSeconds / progress.durationSeconds : 0;
-  const watched = progress?.finished || pct > 0.92;
+  const tracked = trackedProgress != null && ep.episode <= trackedProgress;
+  const watched = progress?.finished || pct > 0.92 || tracked;
   const upcoming = ep.airDate ? Date.parse(ep.airDate) > Date.now() : false;
+  const veiled = hideSpoilers && !watched && pct === 0;
   const markWatched = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (watched) await api.progress.remove(ep.id);
-    else
-      await api.progress.save({
-        itemKey: ep.id,
-        mediaType: detail.mediaType,
-        mediaId: detail.id,
-        season: ep.season,
-        episode: ep.episode,
-        positionSeconds: (ep.runtime ?? 24) * 60,
-        durationSeconds: (ep.runtime ?? 24) * 60,
-        finished: true,
-        title: detail.title,
-        poster: detail.poster,
-        backdrop: detail.backdrop,
-        year: detail.year,
-      });
+    try {
+      if (watched) {
+        await api.progress.remove(ep.id);
+        // Lists only go back when this was the last episode they counted.
+        if (tracked) qc.setQueryData(['track-entry', detail.id], await api.trackers.setEntry(detail.id, { progress: ep.episode - 1, status: 'watching' }));
+      } else
+        await api.progress.save({
+          itemKey: ep.id,
+          mediaType: detail.mediaType,
+          mediaId: detail.id,
+          season: ep.season,
+          episode: ep.episode,
+          positionSeconds: (ep.runtime ?? 24) * 60,
+          durationSeconds: (ep.runtime ?? 24) * 60,
+          finished: true,
+          title: detail.title,
+          poster: detail.poster,
+          backdrop: detail.backdrop,
+          year: detail.year,
+        });
+    } catch (err) {
+      toast(errorText(err), 'bad');
+    }
     qc.invalidateQueries({ queryKey: ['media-progress'] });
     qc.invalidateQueries({ queryKey: ['summary'] });
     qc.invalidateQueries({ queryKey: ['continue'] });
+    // The lists update in the background; look again in a moment.
+    if (detail.mediaType === 'anime') window.setTimeout(() => qc.invalidateQueries({ queryKey: ['track-entry', detail.id] }), 2500);
   };
   return (
     <motion.div
@@ -473,7 +426,11 @@ function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; 
       className={cls('group flex cursor-pointer gap-4 rounded-2xl p-2.5 transition-colors hover:bg-white/5', upcoming && 'cursor-default opacity-50', focused && 'bg-white/6 ring-1 ring-accent/60')}
     >
       <div className="relative aspect-video w-36 shrink-0 overflow-hidden rounded-xl bg-ink-800 sm:w-52">
-        {ep.still ? <img src={ep.still} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-105" /> : <div className="grid size-full place-items-center font-display text-2xl text-faint">{ep.episode}</div>}
+        {ep.still ? (
+          <img src={ep.still} alt="" loading="lazy" className={cls('size-full object-cover transition-transform duration-300 group-hover:scale-105', veiled && 'scale-110 blur-xl')} />
+        ) : (
+          <div className="grid size-full place-items-center font-display text-2xl text-faint">{ep.episode}</div>
+        )}
         {!upcoming && (
           <div className="absolute inset-0 grid place-items-center bg-black/30 opacity-0 transition-opacity group-hover:opacity-100">
             <span className="grid size-10 place-items-center rounded-full bg-white/95 text-black">
@@ -494,8 +451,9 @@ function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; 
               {episodeLabel(detail.mediaType, ep.season, ep.episode)}
               {ep.runtime ? ` · ${fmtRuntime(ep.runtime)}` : ''}
               {ep.airDate ? ` · ${upcoming ? 'Airs ' : ''}${new Date(ep.airDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: upcoming ? undefined : 'numeric' })}` : ''}
+              {ep.filler && <span className="ml-1.5 rounded bg-warn/15 px-1.5 py-0.5 text-[10px] font-semibold text-warn uppercase">{ep.filler}</span>}
             </div>
-            <div className="mt-0.5 truncate font-semibold">{ep.title}</div>
+            <div className="mt-0.5 truncate font-semibold">{veiled ? `Episode ${ep.episode}` : ep.title}</div>
           </div>
           {onServer && (
             <span title="On your server" className="mt-0.5 text-accent">
@@ -516,12 +474,12 @@ function EpisodeRow({ ep, detail, progress, onServer, focused }: { ep: Episode; 
             </button>
           )}
           {!upcoming && (
-            <button onClick={markWatched} aria-label={watched ? 'Mark unwatched' : 'Mark watched'} className={cls('rounded-full p-1 transition', watched ? 'text-ok' : 'text-faint opacity-0 group-hover:opacity-100 hover:text-fg max-sm:opacity-100')}>
+            <button onClick={markWatched} aria-label={watched ? 'Mark unwatched' : 'Mark watched'} title={watched ? 'Mark unwatched' : 'Mark watched'} className={cls('rounded-full p-1 transition', watched ? 'text-ok' : 'text-faint opacity-0 group-hover:opacity-100 hover:text-fg max-sm:opacity-100')}>
               <CheckCircle2 className="size-5" />
             </button>
           )}
         </div>
-        {ep.overview && <p className="mt-1 line-clamp-2 text-sm text-muted max-sm:hidden">{ep.overview}</p>}
+        {ep.overview && !veiled && <p className="mt-1 line-clamp-2 text-sm text-muted max-sm:hidden">{ep.overview}</p>}
       </div>
       {discuss && (
         // Portal clicks still bubble through React: keep them from opening the episode.
@@ -538,6 +496,10 @@ function Episodes({ detail, progress, serverEpisodes, initialSeason, focusEpisod
   const [season, setSeason] = useState(initialSeason);
   useEffect(() => setSeason(initialSeason), [initialSeason]);
   const { data: episodes, isLoading } = useEpisodes(detail.id, season);
+  const { data: prefs } = usePrefs();
+  const connected = useTrackersConnected();
+  const entry = useTrackEntry(detail.mediaType === 'anime' ? detail.id : null, connected);
+  const trackedProgress = entry.data ? (entry.data.anilist?.progress ?? entry.data.mal?.progress ?? null) : null;
   const [page, setPage] = useState(0);
   const PAGE = 50;
   const list = episodes ?? [];
@@ -590,7 +552,16 @@ function Episodes({ detail, progress, serverEpisodes, initialSeason, focusEpisod
       )}
       <div className="grid gap-1 lg:grid-cols-2">
         {list.slice(page * PAGE, (page + 1) * PAGE).map((ep) => (
-          <EpisodeRow key={ep.id} ep={ep} detail={detail} progress={byKey.get(ep.id)} onServer={serverEpisodes.has(`${ep.season}:${ep.episode}`)} focused={focus === ep.episode} />
+          <EpisodeRow
+            key={ep.id}
+            ep={ep}
+            detail={detail}
+            progress={byKey.get(ep.id)}
+            onServer={serverEpisodes.has(`${ep.season}:${ep.episode}`)}
+            focused={focus === ep.episode}
+            trackedProgress={trackedProgress}
+            hideSpoilers={Boolean(prefs?.ui.hideSpoilers)}
+          />
         ))}
       </div>
       {!isLoading && !list.length && <p className="text-sm text-muted">No episode list yet.</p>}
@@ -715,7 +686,7 @@ export function Title() {
             {detail.tagline && <p className="mt-2 text-lg text-white/70 italic">{detail.tagline}</p>}
             <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-white/80">
               {detail.rating != null && detail.rating > 0 && (
-                <span className="flex items-center gap-1 font-semibold text-white">
+                <span className="nova-score flex items-center gap-1 font-semibold text-white">
                   <Star className="size-3.5 fill-amber-300 text-amber-300" /> {detail.rating.toFixed(1)}
                 </span>
               )}
@@ -803,6 +774,11 @@ export function Title() {
                       }}
                     >
                       Private on the server
+                    </MenuItem>
+                  )}
+                  {detail.mediaType === 'anime' && (
+                    <MenuItem icon={<ExternalLink />} onClick={() => window.open(`https://anilist.co/anime/${detail.id.split(':')[1]}`, '_blank', 'noopener')}>
+                      Open on AniList
                     </MenuItem>
                   )}
                   {detail.malId && (

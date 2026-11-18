@@ -81,7 +81,7 @@ function GuestTitle({ detail, onBack }: { detail: CatalogDetail; onBack: () => v
           <h1 className="font-display text-4xl font-bold sm:text-6xl">{detail.title}</h1>
           <div className="mt-2 flex items-center gap-3 text-sm text-white/75">
             {detail.rating ? (
-              <span className="flex items-center gap-1">
+              <span className="nova-score flex items-center gap-1">
                 <Star className="size-3.5 fill-amber-300 text-amber-300" /> {detail.rating.toFixed(1)}
               </span>
             ) : null}

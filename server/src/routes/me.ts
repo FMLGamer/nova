@@ -19,6 +19,8 @@ import {
 } from '../services/collections.js';
 import { listNotifications, markNotificationsRead } from '../services/notifications.js';
 import { getPreferences } from '../services/profiles.js';
+import { dismiss as dismissRecommendation, recommendations } from '../services/recommend.js';
+import { profileStats } from '../services/stats.js';
 import { upNext } from '../services/upnext.js';
 
 export const meRouter = Router();
@@ -72,6 +74,26 @@ meRouter.get(
 meRouter.post('/upnext/dismiss', (req, res) => {
   const { itemKey } = parse(z.object({ itemKey: z.string().min(1).max(200) }), req.body);
   db.prepare('INSERT OR IGNORE INTO upnext_dismissed (profile_id, item_key) VALUES (?, ?)').run(req.profile!.id, itemKey);
+  res.json({ ok: true });
+});
+
+meRouter.get(
+  '/stats',
+  asyncHandler(async (req, res) => {
+    res.json(await profileStats(req.profile!.id));
+  }),
+);
+
+meRouter.get(
+  '/recommendations',
+  asyncHandler(async (req, res) => {
+    res.json(await recommendations(req.profile!.id));
+  }),
+);
+
+meRouter.post('/recommendations/dismiss', (req, res) => {
+  const { mediaId } = parse(z.object({ mediaId: z.string().min(3).max(200) }), req.body);
+  dismissRecommendation(req.profile!.id, mediaId);
   res.json({ ok: true });
 });
 

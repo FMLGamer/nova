@@ -52,7 +52,7 @@ export function AudioDock() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 100, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 900, damping: 60 }}
-          className="fixed inset-x-2 bottom-[4.6rem] z-40 lg:inset-x-auto lg:right-6 lg:bottom-6 lg:w-[440px]"
+          className="fixed inset-x-2 bottom-[4.6rem] z-40 sm:inset-x-auto sm:right-6 sm:bottom-6 sm:w-[440px]"
         >
           <div className="glass-strong relative overflow-hidden rounded-2xl shadow-2xl">
             <div className="absolute inset-x-0 top-0 h-0.5 bg-white/10">

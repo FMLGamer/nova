@@ -18,6 +18,7 @@ const LibraryPage = lazy(() => import('./pages/Library'));
 const CollectionPage = lazy(() => import('./pages/Collection'));
 const Live = lazy(() => import('./pages/Live'));
 const Read = lazy(() => import('./pages/Read'));
+const ReadTitle = lazy(() => import('./pages/ReadTitle'));
 const Reader = lazy(() => import('./pages/Reader'));
 const Music = lazy(() => import('./pages/Music'));
 const Settings = lazy(() => import('./pages/Settings'));
@@ -94,6 +95,7 @@ export function App() {
             <Route path="/collection/:id" element={<CollectionPage />} />
             <Route path="/live" element={<Live />} />
             <Route path="/read" element={<Read />} />
+            <Route path="/read/:kind/:id" element={<ReadTitle />} />
             <Route path="/music/*" element={<Music />} />
             <Route path="/settings/:section?" element={<Settings />} />
             <Route path="/admin/:section?" element={<Admin />} />

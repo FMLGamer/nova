@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  BarChart3,
   CalendarDays,
   ChevronLeft,
   ChevronRight,
@@ -12,6 +13,7 @@ import {
   FolderHeart,
   HardDrive,
   Heart,
+  ListChecks,
   Pin,
   Play,
   Plus,
@@ -29,14 +31,16 @@ import { errorText, toast } from '../lib/store';
 import type { CalendarEntry, Collection } from '../lib/types';
 import { PosterCard } from '../components/media';
 import { Badge, Button, Empty, Input, Modal, Progress, Segmented, Spinner } from '../components/ui';
-import { Kicker } from './Browse';
+import { Stats, TrackerLists } from './LibraryExtras';
 
 const TABS = [
   { id: '', label: 'My List', icon: Heart },
   { id: 'collections', label: 'Collections', icon: FolderHeart },
+  { id: 'anime-lists', label: 'Anime & manga', icon: ListChecks },
   { id: 'calendar', label: 'Calendar', icon: CalendarDays },
   { id: 'downloads', label: 'Downloads', icon: Download },
   { id: 'history', label: 'History', icon: Clock },
+  { id: 'stats', label: 'Stats', icon: BarChart3 },
 ];
 
 function Grid({ children }: { children: React.ReactNode }) {
@@ -476,7 +480,6 @@ export default function Library() {
   const { tab = '' } = useParams();
   return (
     <div className="px-5 pt-24 sm:px-10 sm:pt-28">
-      <Kicker tone="#e5182f">Saved · Watching · Downloads</Kicker>
       <h1 className="font-display text-4xl font-bold tracking-tight sm:text-6xl">Your library</h1>
       <nav className="scrollbar-none -mx-5 mt-6 mb-8 flex gap-1 overflow-x-auto px-5 sm:mx-0 sm:px-0">
         {TABS.map((t) => (
@@ -495,9 +498,11 @@ export default function Library() {
       <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}>
         {tab === '' && <MyList />}
         {tab === 'collections' && <Collections />}
+        {tab === 'anime-lists' && <TrackerLists />}
         {tab === 'calendar' && <CalendarView />}
         {tab === 'downloads' && <Downloads />}
         {tab === 'history' && <History />}
+        {tab === 'stats' && <Stats />}
       </motion.div>
     </div>
   );

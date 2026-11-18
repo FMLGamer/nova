@@ -17,21 +17,29 @@ Nova ships no content sources of its own. Everything that finds or fetches media
 
 | | What it is | Who streams torrents |
 |---|---|---|
-| **Nova for Windows** | Installer, `.zip` or portable `.exe`. Everything runs on your PC, with no account or setup. | Your PC |
+| **Nova desktop app** | For Windows, macOS and Linux: installer, `.zip`/`.tar.gz`, portable `.exe` or AppImage. Everything runs on your computer, with no account or setup. | Your computer |
 | **Docker: `nova:latest`** | Multi-user server with invite-only accounts. | The server |
-| **Docker: `nova:client`** | Same server, but it never joins a torrent swarm. | Each viewer's device, through Nova for Windows or the browser |
+| **Docker: `nova:client`** | Same server, but it never joins a torrent swarm. | Each viewer's device, through the desktop app or the browser |
 
-### Nova for Windows
+### Nova desktop app
 
 1. From [Releases](https://github.com/FMLGamer/nova/releases), download one of:
-   - `Nova-Setup-x.y.z.exe`: the installer.
-   - `Nova-x.y.z-win.zip`: unzip anywhere and run `Nova.exe`.
-   - `Nova-Portable-x.y.z.exe`: a single file, but it unpacks itself on every start, so it opens slower than the other two.
+   - **Windows**
+     - `Nova-Setup-x.y.z.exe`: the installer. It updates itself.
+     - `Nova-x.y.z-win.zip`: unzip anywhere and run `Nova.exe`.
+     - `Nova-Portable-x.y.z.exe`: a single file, but it unpacks itself on every start, so it opens slower than the other two.
+   - **macOS** (Apple silicon): `Nova-x.y.z-mac-arm64.dmg` or `.zip`. The app isn't notarized by Apple. On first start,
+     allow it under **System Settings → Privacy & Security → Open Anyway**, or run `xattr -cr /Applications/Nova.app`.
+   - **Linux**: `Nova-x.y.z-linux-*.AppImage` (make it executable and run it; it updates itself) or the `.tar.gz`.
 2. Open it.
 3. Go to **Server → Plugins** to add sources.
 
-The installed and zip versions keep their data in `%APPDATA%\Nova`. The portable app keeps it in a `Nova Data` folder next to the `.exe`.
-Media you keep goes to `Videos\Nova`.
+The installed and zip versions keep their data in the system's app-data folder (`%APPDATA%\Nova`,
+`~/Library/Application Support/Nova` or `~/.config/Nova`). The portable app keeps it in a `Nova Data` folder next to the `.exe`.
+Media you keep goes to your Videos (Movies on macOS) folder, under `Nova`.
+
+The Windows installer and the AppImage download new versions in the background and install them when you close Nova
+(**Settings → About Nova → Updates**). The other builds tell you when a new version is out.
 
 The app also works as a local streaming engine for `nova:client` servers. When such a site wants to play a torrent, Nova asks
 you once whether to allow it. Allowed sites are listed under **Settings → Account & sharing**.
@@ -93,8 +101,8 @@ priority:
 | `HW_ACCEL` | none | `vaapi` for Intel/AMD hardware transcoding (pass `/dev/dri`) |
 | `COOKIE_SECURE` | follows HTTPS | Force `true`/`false` |
 | `CAST_DEVICES` | none | TVs to offer when discovery can't see them, e.g. `chromecast:192.168.1.40,dlna:http://192.168.1.41:9197/dmr` (admins can also add them by address in the player's Cast menu) |
-| `CAST_PORT` | `11472` (Windows app) | LAN port the Windows app serves cast streams on |
-| `PROJECT_URL` | this repository | Where "Report a problem" and update links point (for forks) |
+| `CAST_PORT` | `11472` (desktop app) | LAN port the desktop app serves cast streams on |
+| `PROJECT_URL` | this repository | Where "Report a problem", update checks and update links point (for forks) |
 | `OLLAMA_URL`, `OLLAMA_MODEL` | none | Built-in local assistant model (needs tool calling) |
 
 Back up `/data`. Everything else can be rebuilt.
@@ -104,14 +112,17 @@ Back up `/data`. Everything else can be rebuilt.
 - **Sources:** you tick which resolutions, codecs, audio and release types are fine (Settings → Sources & quality).
   Of the sources that fit, the best-seeded one plays; the rest stay one click away.
 - **Playback:**
-  - Custom player with Anime4K, CAS and deband shaders, picture-in-picture and a sleep timer.
+  - Custom player with Anime4K, CAS and deband shaders, picture-in-picture, screenshots and a sleep timer.
+  - Keyboard shortcuts you can change (Settings → Playback).
   - Audio formats browsers can't play (E-AC-3, DTS, TrueHD) are converted on the fly.
   - Hardware transcoding.
   - External players (VLC, mpv, IINA).
+  - Collections play in order (**Play all**).
 - **Subtitles:**
   - Embedded Matroska tracks are read around the playhead, so they show up right away, even on a torrent that's still
     downloading.
   - ASS/SSA tracks render with libass (JASSUB), including embedded fonts, signs and karaoke.
+  - Tracks with names you never want ("Signs & Songs", "Forced") are skipped when Nova picks one.
   - OpenSubtitles search and machine translation.
 - **Skipping:** intro and credits through AniSkip, or the file's own chapters.
 - **Casting:**
@@ -120,11 +131,23 @@ Back up `/data`. Everything else can be rebuilt.
   - Text subtitles go to the TV as subtitles. ASS/SSA subtitles are burned into the picture while casting (one live
     encode with the file's own fonts, on the GPU when there is one).
   - A server in a container only sees TVs with host networking, or the ones listed in `CAST_DEVICES` or added by address.
-- **Reading:** a comic reader (single page, spread or scroll, in either direction) and an EPUB/PDF reader with highlights,
-  notes and dyslexia-friendly typefaces. Point Nova at existing folders of e-books, comics and manga under
-  **Server → Library → Reading folders**; it reads them in place and never changes them.
-- **Anime tracking:** connect AniList and/or MyAnimeList per profile (Settings → Anime tracking). Finished episodes update
-  your list, the status can be changed from a show's page, and every episode links to its discussion threads.
+- **Reading:**
+  - A catalogue of manga, manhwa, manhua and light novels (AniList) and books (Open Library). Each title page shows
+    where you can read it: a free public-domain edition (Project Gutenberg), your own files, or your plugins.
+  - A comic reader (single page, spread or scroll, in either direction) and an EPUB/PDF reader with highlights, notes
+    and dyslexia-friendly typefaces.
+  - Point Nova at existing folders of e-books, comics and manga under **Server → Library → Reading folders**; it reads
+    them in place, never changes them, and picks up new files as they appear.
+- **Anime & manga tracking:** connect AniList and/or MyAnimeList per profile (Settings → Anime & manga tracking); with
+  both, every change goes to both.
+  - Episodes count as watched at a share you choose (80% by default) and manga chapters when you finish them. Shows you
+    start are added as Watching.
+  - Set the status, progress and score from a title's page, or mark episodes watched by hand.
+  - Your lists are under **Library → Anime & manga**. The anime schedule can show only what you're watching.
+  - Episode discussion threads open inside Nova.
+- **For you:** recommendations on Home, built from what you watch and finish, plus a **Stats** page in your library.
+- **Make it yours:** hide spoilers (titles and thumbnails of episodes you haven't seen), hide scores, custom CSS, filler
+  episodes marked, and Discord status in the desktop app.
 - **Live TV:** M3U, Xtream, Stalker/Ministra and HDHomeRun inputs, the iptv-org directory and an XMLTV guide.
 - **People:** invite-only accounts, profiles, expiring guest links, and watch rooms with chat.
 - **Plugins:**
@@ -140,8 +163,10 @@ DEV_AUTH=1 node server/dist/index.js     # API on :3000; DEV_AUTH signs you in a
 npm run dev                              # UI on :5173 (proxies /api, /stream, /live, /ws)
 ```
 
-To build the Windows app (on Windows), run `npm --prefix desktop install && npm --prefix desktop run dist`. The installer,
-zip and portable `.exe` end up in `desktop/release/`.
+To build the desktop app, run `npm --prefix desktop install && npm --prefix desktop run dist` on the platform you build
+for. The installer, archives and portable app end up in `desktop/release/`. For the Discord status, create an application
+at https://discord.com/developers/applications and set its ID as `DISCORD_CLIENT_ID` when building (in CI: a repository
+variable of that name); without it the Discord option stays hidden.
 
 The project layout:
 

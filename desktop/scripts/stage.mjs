@@ -13,6 +13,7 @@ const desktop = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const root = path.resolve(desktop, '..');
 const out = path.join(desktop, 'app');
 const require = createRequire(import.meta.url);
+const exe = (name) => (process.platform === 'win32' ? `${name}.exe` : name);
 
 const run = (cmd, cwd) => {
   console.log(`\n> ${cmd}   (${path.relative(root, cwd) || '.'})`);
@@ -30,6 +31,8 @@ if (!process.env.NOVA_SKIP_BUILD) {
 
 copy(path.join(root, 'dist'), path.join(out, 'web'));
 fs.copyFileSync(path.join(desktop, 'build', 'icon.png'), path.join(out, 'icon.png'));
+// Optional values baked in by CI (e.g. the Discord application that shows "Watching on Nova").
+fs.writeFileSync(path.join(out, 'build-info.json'), JSON.stringify({ discordClientId: process.env.DISCORD_CLIENT_ID || '' }));
 
 const server = path.join(out, 'server');
 copy(path.join(root, 'server', 'dist'), path.join(server, 'dist'));
@@ -37,11 +40,15 @@ for (const f of ['package.json', 'package-lock.json']) copy(path.join(root, 'ser
 run('npm ci --omit=dev --no-audit --no-fund', server);
 
 fs.mkdirSync(path.join(out, 'runtime'), { recursive: true });
-fs.copyFileSync(process.execPath, path.join(out, 'runtime', 'node.exe'));
+const place = (from, to) => {
+  fs.copyFileSync(from, to);
+  fs.chmodSync(to, 0o755);
+};
+place(process.execPath, path.join(out, 'runtime', exe('node')));
 
 fs.mkdirSync(path.join(out, 'bin'), { recursive: true });
-fs.copyFileSync(require('ffmpeg-static'), path.join(out, 'bin', 'ffmpeg.exe'));
-fs.copyFileSync(require('ffprobe-static').path, path.join(out, 'bin', 'ffprobe.exe'));
+place(require('ffmpeg-static'), path.join(out, 'bin', exe('ffmpeg')));
+place(require('ffprobe-static').path, path.join(out, 'bin', exe('ffprobe')));
 fs.writeFileSync(
   path.join(out, 'bin', 'README.txt'),
   'ffmpeg and ffprobe are separate programs from the FFmpeg project (https://ffmpeg.org), distributed under the GPL.\n' +

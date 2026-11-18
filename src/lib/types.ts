@@ -24,6 +24,8 @@ export interface Episode {
   still: string | null;
   airDate: string | null;
   runtime: number | null;
+  /** Anime: 'filler' or 'recap' when the episode is known to be one. */
+  filler?: 'filler' | 'recap' | null;
 }
 
 export interface Season {
@@ -151,6 +153,8 @@ export interface Preferences {
     preferredGroups: string[];
     calendarFilter: 'all' | 'mylist' | 'watching';
     scheduleAllTitles: boolean;
+    trackAutoAdd: boolean;
+    trackAt: number;
   };
   ui: {
     autoplayNext: boolean;
@@ -175,6 +179,12 @@ export interface Preferences {
     skipIntroAutomatically: boolean;
     skipCreditsAutomatically: boolean;
     accent: 'nova' | 'ember' | 'ocean' | 'aurora' | 'mono';
+    updateNotices: boolean;
+    hideSpoilers: boolean;
+    hideScores: boolean;
+    customCss: string;
+    subtitleIgnore: string[];
+    shortcuts: Record<string, string>;
   };
   reader: {
     typeface: 'literata' | 'atkinson' | 'dyslexic' | 'serif' | 'sans';
@@ -403,6 +413,52 @@ export interface AppConfig {
   projectUrl: string;
 }
 
+export type ReadFormat = 'manga' | 'manhwa' | 'manhua' | 'novel' | 'oneshot' | 'book';
+
+export interface ReadItem {
+  id: string;
+  format: ReadFormat;
+  title: string;
+  year: number | null;
+  poster: string | null;
+  backdrop: string | null;
+  overview: string;
+  rating: number | null;
+  genres: string[];
+  author: string | null;
+}
+
+export interface ReadDetail extends ReadItem {
+  status: string | null;
+  chapters: number | null;
+  volumes: number | null;
+  altTitles: string[];
+  links: { label: string; url: string }[];
+  related: (Pick<ReadItem, 'id' | 'title' | 'poster' | 'format'> & { relation: string })[];
+  anilistId: number | null;
+  malId: number | null;
+}
+
+export interface AppUpdate {
+  current: string;
+  latest: { version: string; url: string; notes: string; publishedAt: string | null } | null;
+  available: boolean;
+}
+
+export interface ProfileStats {
+  totals: { seconds: number; titles: number; episodes: number; movies: number; activeDays: number; streak: number };
+  byType: { type: string; seconds: number; titles: number }[];
+  months: { month: string; seconds: number }[];
+  genres: { name: string; seconds: number }[];
+  top: { mediaId: string; mediaType: string; title: string; poster: string | null; seconds: number; episodes: number }[];
+  reading: { kind: string; finished: number; reading: number }[];
+}
+
+export interface Recommendations {
+  forYou: { item: CatalogItem; reason: string }[];
+  because: { seed: { mediaId: string; title: string }; items: CatalogItem[] }[];
+}
+
 export interface EnginePairing {
   id: string;
   origin: string;
@@ -521,7 +577,7 @@ export interface LibrarySource {
 
 // ---------------------------------------------------------------- anime tracking
 
-export type TrackStatus = 'watching' | 'completed' | 'planning' | 'paused' | 'dropped';
+export type TrackStatus = 'watching' | 'rewatching' | 'completed' | 'planning' | 'paused' | 'dropped';
 
 interface TrackerAccount {
   connected: boolean;
@@ -555,6 +611,38 @@ export interface Discussion {
   title: string;
   url: string;
   comments: number | null;
+  embed: { site: 'anilist' | 'mal'; id: number } | null;
+}
+
+export interface ThreadPost {
+  id: number;
+  user: string;
+  avatar: string | null;
+  createdAt: number;
+  likes: number | null;
+  html: string;
+  replies: ThreadPost[];
+}
+
+export interface Thread {
+  title: string;
+  url: string;
+  post: ThreadPost | null;
+  comments: ThreadPost[];
+  page: number;
+  hasMore: boolean;
+}
+
+export interface TrackedShow {
+  mediaId: string;
+  title: string;
+  poster: string | null;
+  status: TrackStatus;
+  progress: number;
+  episodes: number | null;
+  score: number | null;
+  sites: ('anilist' | 'mal')[];
+  updatedAt: number;
 }
 
 export interface MediaFile extends LibraryFile {

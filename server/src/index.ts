@@ -30,7 +30,7 @@ import { every } from './lib/scheduler.js';
 import { bootPlugins, checkAllUpdates } from './plugins/manager.js';
 import { startPluginJobs } from './plugins/jobs.js';
 import { pumpDownloads, recoverDownloads } from './library/downloads.js';
-import { scanLibrary } from './library/library.js';
+import { scanLibrary, watchLibrary } from './library/library.js';
 import { runAllRules } from './library/rules.js';
 import { refreshAllEpg, refreshAllLive } from './services/live.js';
 import { scheduleBackups } from './services/backups.js';
@@ -202,6 +202,7 @@ if (config.torrentMode === 'server') {
   every('auto-download-rules', 30 * 60_000, runAllRules, { initialDelayMs: 2 * 60_000 });
 }
 every('library-scan', config.library.scanIntervalMinutes * 60_000, scanLibrary, { initialDelayMs: 60_000 });
+watchLibrary();
 every('live-refresh', 6 * 3600_000, refreshAllLive, { initialDelayMs: 3 * 60_000 });
 every('epg-refresh', 12 * 3600_000, refreshAllEpg, { initialDelayMs: 4 * 60_000 });
 scheduleBackups();

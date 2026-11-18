@@ -241,7 +241,22 @@ export default function Watch() {
   }, [episodes, episode, isMovie, isAnime, nextSeasonEps.data]);
   const currentEp = episodes?.find((e) => e.episode === episode);
 
-  const go = (s: number | null, e: number) => navigate(watchPath({ mediaId, season: s, episode: e }, roomCode ? { room: roomCode } : undefined), { replace: true });
+  // Playing a collection (Play all): after the last episode, its next title starts.
+  const listId = params.get('list');
+  const listQ = useQuery({ queryKey: ['collection', listId], queryFn: () => api.me.collection(listId!), enabled: Boolean(listId), staleTime: 60_000 });
+  const nextInList = useMemo(() => {
+    const items = listQ.data?.items ?? [];
+    const i = items.findIndex((x) => x.mediaId === mediaId);
+    return i >= 0 ? (items[i + 1] ?? null) : null;
+  }, [listQ.data, mediaId]);
+  const next = nextEp ?? (nextInList ? { season: null, episode: 0, title: nextInList.title ?? 'Next', still: nextInList.poster, label: `Next in ${listQ.data!.name}` } : null);
+  const keep = { ...(roomCode ? { room: roomCode } : {}), ...(listId ? { list: listId } : {}) };
+
+  const go = (s: number | null, e: number) => navigate(watchPath({ mediaId, season: s, episode: e }, keep), { replace: true });
+  const goNext = () => {
+    if (nextEp) go(nextEp.season, nextEp.episode);
+    else if (nextInList) navigate(watchPath({ mediaId: nextInList.mediaId }, keep), { replace: true });
+  };
   const back = () => (window.history.length > 1 ? navigate(-1) : navigate(titlePath(mediaId)));
 
   const saveProgress = useCallback(
@@ -303,7 +318,7 @@ export default function Watch() {
           itemKey={itemKey}
           detail={detail}
           episodes={episodes ?? []}
-          next={nextEp}
+          next={next}
           startAt={startAt}
           roomCode={roomCode}
           wantRoom={wantRoom}
@@ -316,7 +331,7 @@ export default function Watch() {
           }}
           onRoomTarget={(t: RoomTarget) => navigate(watchPath({ mediaId: t.mediaId, season: t.season, episode: t.episode }, { room: roomCode ?? '' }), { replace: true })}
           onBack={back}
-          onNext={() => nextEp && go(nextEp.season, nextEp.episode)}
+          onNext={goNext}
           onEpisode={(s, e) => go(s, e)}
           onSources={() => setPicker(true)}
           onProgress={saveProgress}

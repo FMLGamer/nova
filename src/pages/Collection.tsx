@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Pin, Share2, Trash2, X } from 'lucide-react';
+import { Pencil, Pin, Play, Share2, Trash2, X } from 'lucide-react';
 import { api } from '../lib/api';
+import { watchPath } from '../lib/format';
 import { errorText, toast } from '../lib/store';
 import type { CatalogItem } from '../lib/types';
 import { PosterCard } from '../components/media';
@@ -33,6 +34,11 @@ export default function CollectionPage() {
           {c.description && <p className="mt-2 max-w-2xl text-muted">{c.description}</p>}
         </div>
         <div className="flex gap-2">
+          {c.items.length > 0 && (
+            <Button variant="white" icon={<Play className="size-4 fill-current" />} onClick={() => navigate(watchPath({ mediaId: c.items[0]!.mediaId }, { list: id }))}>
+              Play all
+            </Button>
+          )}
           <Button
             variant={c.pinned ? 'white' : 'glass'}
             icon={<Pin className="size-4" />}

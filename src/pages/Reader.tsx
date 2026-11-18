@@ -6,11 +6,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { unzipSync } from 'fflate';
 import { ArrowLeft, Bookmark, BookmarkCheck, ChevronLeft, ChevronRight, Download, ListTree, NotebookPen, Trash2, Type, X } from 'lucide-react';
 import { api } from '../lib/api';
+import { publicImage, setPresence } from '../lib/desktop';
 import { cls } from '../lib/format';
 import { offlineFile, useOffline } from '../lib/offline';
 import { usePrefs, useSavePrefs } from '../lib/queries';
 import { READING_FONTS } from '../lib/reading-fonts';
-import { readerKey, readerPath, type ReaderSource } from '../lib/reader';
+import { chapterOf, readerKey, readerPath, type ReaderSource } from '../lib/reader';
 import { errorText, toast } from '../lib/store';
 import type { Annotation, Preferences, ReadingKind } from '../lib/types';
 import { themeColors, type ReaderHandle } from '../components/reader/common';
@@ -217,7 +218,7 @@ export default function Reader() {
   }, [series.data, source]);
   const openNext = () => {
     if (source?.type !== 'plugin' || !nextChapter) return;
-    navigate(readerPath({ ...source, videoId: nextChapter.id, title: `${source.series ?? series.data?.name ?? ''} — ${nextChapter.title}` }), { replace: true });
+    navigate(readerPath({ ...source, videoId: nextChapter.id, title: `${source.series ?? series.data?.name ?? ''} — ${nextChapter.title}`, chapter: chapterOf(nextChapter) }), { replace: true });
   };
 
   useEffect(() => {
@@ -266,6 +267,25 @@ export default function Reader() {
     const t = window.setTimeout(() => setChrome(false), 3500);
     return () => window.clearTimeout(t);
   }, [chrome, panel, loc?.locator]);
+
+  const presenceTitle = source ? ('series' in source && source.series) || source.title : null;
+  useEffect(() => {
+    if (!presenceTitle) return;
+    setPresence({ kind: 'reading', title: presenceTitle, subtitle: presenceTitle !== source?.title ? source?.title.replace(`${presenceTitle} — `, '') : loc?.label, image: publicImage(source?.cover), start: Math.floor(Date.now() / 1000) });
+    return () => setPresence(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [presenceTitle, source?.title]);
+
+  // Finishing a chapter of a series matched to AniList moves the connected manga lists forward.
+  const trackKey = source?.type === 'plugin' && source.anilist && source.chapter ? `${source.anilist}:${source.chapter}` : null;
+  const finished = (loc?.percent ?? 0) >= 0.95;
+  const tracked = useRef<string | null>(null);
+  useEffect(() => {
+    if (!trackKey || !finished || tracked.current === trackKey) return;
+    tracked.current = trackKey;
+    const [id, chapter] = trackKey.split(':');
+    api.trackers.progress(`manga:${id}`, Math.floor(Number(chapter))).catch(() => {});
+  }, [trackKey, finished]);
 
   if (!prefsAll) return null;
   const prefs = prefsAll.reader;
@@ -334,7 +354,7 @@ export default function Reader() {
       <AnimatePresence>
         {chrome && (
           <>
-            <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -20, opacity: 0 }} className="absolute inset-x-0 top-0 z-30 flex items-center gap-2 px-3 pt-safe-2 pb-2" style={{ background: `linear-gradient(${bg}, ${bg}ee 60%, transparent)` }}>
+            <motion.div initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -20, opacity: 0 }} className="app-drag wco-pad absolute inset-x-0 top-0 z-30 flex items-center gap-2 pt-safe-2 pb-2 [--wco-px:0.75rem]" style={{ background: `linear-gradient(${bg}, ${bg}ee 60%, transparent)` }}>
               <button onClick={() => navigate(-1)} aria-label="Back" className="grid size-10 place-items-center rounded-full hover:bg-black/10">
                 <ArrowLeft className="size-5" />
               </button>

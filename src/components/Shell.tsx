@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { Component, Suspense, lazy, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
+import { Component, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   Bell,
@@ -10,6 +11,7 @@ import {
   House,
   Library,
   LogOut,
+  Menu as MenuIcon,
   Music2,
   Radio,
   Search,
@@ -20,12 +22,14 @@ import {
   Tv,
   UserRound,
   Users,
+  X,
 } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { desktop, useDesktopInfo } from '../lib/desktop';
 import { cls, relTime, reportIssueUrl } from '../lib/format';
 import { useAppConfig, useContributions, useNotifications, usePrefs, useProfile, useSession } from '../lib/queries';
-import { useApp } from '../lib/store';
+import { toast, useApp } from '../lib/store';
 import { Avatar, Menu, MenuItem, Spinner, Toaster } from './ui';
 import { CommandPalette } from './CommandPalette';
 import { AudioDock } from './AudioDock';
@@ -64,7 +68,17 @@ function useAppearance() {
     const root = document.documentElement;
     root.dataset.accent = prefs?.ui.accent ?? 'nova';
     root.dataset.reduceMotion = String(Boolean(prefs?.ui.reduceMotion));
-  }, [prefs?.ui.accent, prefs?.ui.reduceMotion]);
+    root.dataset.hideScores = String(Boolean(prefs?.ui.hideScores));
+  }, [prefs?.ui.accent, prefs?.ui.reduceMotion, prefs?.ui.hideScores]);
+  useEffect(() => {
+    const css = prefs?.ui.customCss?.trim();
+    if (!css) return;
+    const el = document.createElement('style');
+    el.dataset.custom = 'profile';
+    el.textContent = css;
+    document.head.appendChild(el);
+    return () => el.remove();
+  }, [prefs?.ui.customCss]);
   useEffect(() => {
     const links = (contrib?.themes ?? []).map((t) => {
       const l = document.createElement('link');
@@ -76,6 +90,30 @@ function useAppearance() {
     });
     return () => links.forEach((l) => l.remove());
   }, [contrib?.themes]);
+}
+
+/** New releases: the desktop app installs its own; otherwise admins get a one-time notice per version. */
+function useUpdateNotice() {
+  const { data: session } = useSession();
+  const { data: prefs } = usePrefs();
+  const [info] = useDesktopInfo();
+  useEffect(
+    () =>
+      desktop?.onUpdate((s) => {
+        if (s.status === 'ready') toast(`Nova ${s.version} is ready to install`, 'ok', { label: 'Restart', run: () => void desktop?.installUpdate() });
+      }),
+    [],
+  );
+  const wanted = desktop ? Boolean(info && !info.update.supported && info.settings.autoUpdate) : Boolean(session?.account.isAdmin && prefs?.ui.updateNotices);
+  const release = useQuery({ queryKey: ['app-update', false], queryFn: () => api.system.update(), enabled: wanted, staleTime: 6 * 3600_000 });
+  useEffect(() => {
+    const latest = release.data?.available ? release.data.latest : null;
+    if (!latest) return;
+    const seen = `nova.update-seen.${latest.version}`;
+    if (localStorage.getItem(seen)) return;
+    localStorage.setItem(seen, '1');
+    toast(`Nova ${latest.version} is out`, 'info', { label: desktop ? 'Download' : "What's new", run: () => window.open(latest.url, '_blank', 'noopener') });
+  }, [release.data]);
 }
 
 function Ambient() {
@@ -246,12 +284,71 @@ function ProfileMenu() {
   );
 }
 
+/** The sections as a vertical list: the top bar's tabs don't fit below `lg`. */
+function NavDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const nav = useNav();
+  const { data: session } = useSession();
+  const location = useLocation();
+  useEffect(onClose, [location.pathname, onClose]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+  const extra: NavEntry[] = [
+    { to: '/library', label: 'My library', icon: Library },
+    { to: '/settings', label: 'Settings', icon: Settings },
+    ...(session?.account.isAdmin ? [{ to: '/admin', label: 'Server', icon: Shield }] : []),
+  ];
+  const link = (n: NavEntry) => (
+    <NavLink key={n.to} to={n.to} end={n.end} className="block">
+      {({ isActive }) => (
+        <span className={cls('flex items-center gap-3 rounded-2xl px-4 py-3 text-[15px] font-medium transition-colors', isActive ? 'bg-white/12 text-fg' : 'text-muted hover:bg-white/6 hover:text-fg')}>
+          <n.icon className="size-5" strokeWidth={isActive ? 2.2 : 1.8} />
+          {n.label}
+        </span>
+      )}
+    </NavLink>
+  );
+  return createPortal(
+    <AnimatePresence>
+      {open && (
+        <motion.div className="fixed inset-0 z-[110] lg:hidden" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+          <div className="absolute inset-0 bg-black/55 backdrop-blur-sm" onClick={onClose} />
+          <motion.nav
+            aria-label="Sections"
+            initial={{ x: -32, opacity: 0 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: -32, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 700, damping: 50 }}
+            className="glass-strong pt-safe absolute inset-y-0 left-0 flex w-72 max-w-[85vw] flex-col gap-1 overflow-y-auto rounded-r-3xl p-3 shadow-2xl"
+          >
+            <div className="flex h-14 items-center justify-between px-2">
+              <Logo />
+              <button onClick={onClose} aria-label="Close menu" className="grid size-10 place-items-center rounded-full text-muted hover:bg-white/8 hover:text-fg">
+                <X className="size-5" />
+              </button>
+            </div>
+            {nav.map(link)}
+            <div className="mx-3 my-2 h-px bg-line" />
+            {extra.map(link)}
+          </motion.nav>
+        </motion.div>
+      )}
+    </AnimatePresence>,
+    document.body,
+  );
+}
+
 function TopBar() {
   const nav = useNav();
   const setPalette = useApp((s) => s.setPalette);
   const openAssistant = useApp((s) => s.openAssistant);
   const { data: session } = useSession();
   const [scrolled, setScrolled] = useState(false);
+  const [drawer, setDrawer] = useState(false);
+  const closeDrawer = useCallback(() => setDrawer(false), []);
   useEffect(() => {
     const on = () => setScrolled(window.scrollY > 24);
     on();
@@ -259,61 +356,66 @@ function TopBar() {
     return () => window.removeEventListener('scroll', on);
   }, []);
   const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  // Over a hero the bar has no background of its own: give the controls one, so they read on light and dark art alike.
+  const pill = scrolled ? '' : 'bg-black/35 ring-1 ring-white/10 backdrop-blur-xl';
 
   return (
     <header className="pt-safe fixed inset-x-0 top-0 z-50">
       <div
         className={cls(
-          'mx-auto flex h-16 items-center gap-2 px-4 transition-all duration-200 ease-snap sm:gap-4 sm:px-8',
-          scrolled ? 'bg-bg/70 backdrop-blur-2xl [box-shadow:0_1px_0_var(--color-line)]' : 'bg-gradient-to-b from-black/60 to-transparent',
+          'app-drag wco-pad transition-all duration-200 ease-snap',
+          scrolled ? 'bg-bg/75 backdrop-blur-2xl [box-shadow:0_1px_0_var(--color-line)]' : 'bg-gradient-to-b from-black/75 via-black/35 to-transparent',
         )}
       >
-        <Link to="/" aria-label="Nova home" className="mr-1 shrink-0">
-          <Logo />
-        </Link>
-
-        <nav className="hidden items-center rounded-full p-1 lg:flex">
-          {nav.map((n) => (
-            <NavLink key={n.to} to={n.to} end={n.end} className="relative rounded-full px-4 py-1.5 text-sm font-medium transition-colors">
-              {({ isActive }) => (
-                <>
-                  {isActive && (
-                    <motion.span layoutId="nav-pill" className="absolute inset-0 rounded-full bg-white/12 ring-1 ring-white/10" transition={{ type: 'spring', stiffness: 1000, damping: 64 }} />
-                  )}
-                  <span className={cls('relative', isActive ? 'text-fg' : 'text-muted hover:text-fg')}>{n.label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-
-        <div className="flex-1" />
-
-        <button
-          onClick={() => setPalette(true)}
-          className="glass flex h-10 items-center gap-2.5 rounded-full pr-2 pl-3.5 text-sm text-muted transition-colors hover:text-fg max-sm:size-10 max-sm:justify-center max-sm:p-0 sm:w-56"
-        >
-          <Search className="size-[18px] shrink-0" />
-          <span className="flex-1 text-left max-sm:hidden">Search</span>
-          <kbd className="rounded-md bg-white/8 px-1.5 py-0.5 font-sans text-[11px] text-faint max-sm:hidden">{isMac ? '⌘' : 'Ctrl'} K</kbd>
-        </button>
-        {session?.settings.liveTvEnabled && (
-          <Link to="/read" aria-label="Read" className="grid size-10 place-items-center rounded-full text-muted hover:text-fg lg:hidden">
-            <BookOpen className="size-[19px]" />
-          </Link>
-        )}
-        {session?.settings.assistantEnabled && (
-          <button
-            onClick={() => openAssistant()}
-            aria-label="Assistant"
-            className="grid size-10 place-items-center rounded-full text-muted transition-colors hover:bg-white/8 hover:text-fg"
-          >
-            <Sparkles className="size-[19px]" />
+        <div className="mx-auto flex h-16 items-center gap-2 px-4 sm:gap-4 sm:px-8">
+          <button onClick={() => setDrawer(true)} aria-label="Open menu" className={cls('grid size-10 shrink-0 place-items-center rounded-full text-fg transition-colors hover:bg-white/10 lg:hidden', pill)}>
+            <MenuIcon className="size-5" />
           </button>
-        )}
-        <Notifications />
-        <ProfileMenu />
+          <Link to="/" aria-label="Nova home" className="mr-1 shrink-0 [filter:drop-shadow(0_1px_6px_rgb(0_0_0/0.45))]">
+            <Logo />
+          </Link>
+
+          <nav className={cls('hidden items-center rounded-full p-1 transition-colors lg:flex', pill)}>
+            {nav.map((n) => (
+              <NavLink key={n.to} to={n.to} end={n.end} className="relative rounded-full px-4 py-1.5 text-sm font-medium transition-colors">
+                {({ isActive }) => (
+                  <>
+                    {isActive && (
+                      <motion.span layoutId="nav-pill" className="absolute inset-0 rounded-full bg-white/15 ring-1 ring-white/15" transition={{ type: 'spring', stiffness: 1000, damping: 64 }} />
+                    )}
+                    <span className={cls('relative', isActive ? 'text-white' : scrolled ? 'text-muted hover:text-fg' : 'text-white/80 hover:text-white')}>{n.label}</span>
+                  </>
+                )}
+              </NavLink>
+            ))}
+          </nav>
+
+          <div className="flex-1" />
+
+          <button
+            onClick={() => setPalette(true)}
+            className="glass flex h-10 items-center gap-2.5 rounded-full pr-2 pl-3.5 text-sm text-muted transition-colors hover:text-fg max-sm:size-10 max-sm:justify-center max-sm:p-0 sm:w-56"
+          >
+            <Search className="size-[18px] shrink-0" />
+            <span className="flex-1 text-left max-sm:hidden">Search</span>
+            <kbd className="rounded-md bg-white/8 px-1.5 py-0.5 font-sans text-[11px] text-faint max-sm:hidden">{isMac ? '⌘' : 'Ctrl'} K</kbd>
+          </button>
+          <div className={cls('flex items-center gap-0.5 rounded-full p-0.5 transition-colors', pill)}>
+            {session?.settings.assistantEnabled && (
+              <button
+                onClick={() => openAssistant()}
+                aria-label="Assistant"
+                className="grid size-10 place-items-center rounded-full text-muted transition-colors hover:bg-white/8 hover:text-fg"
+              >
+                <Sparkles className="size-[19px]" />
+              </button>
+            )}
+            <Notifications />
+            <ProfileMenu />
+          </div>
+        </div>
       </div>
+      <NavDrawer open={drawer} onClose={closeDrawer} />
     </header>
   );
 }
@@ -329,7 +431,7 @@ function MobileNav() {
     { to: '/library', label: 'Library', icon: UserRound },
   ];
   return (
-    <nav className="pb-safe glass-strong fixed inset-x-0 bottom-0 z-50 border-x-0 border-b-0 lg:hidden">
+    <nav className="pb-safe glass-strong fixed inset-x-0 bottom-0 z-50 border-x-0 border-b-0 sm:hidden">
       <div className="flex h-16 items-stretch justify-around px-1">
         {items.map((n) => (
           <NavLink key={n.to} to={n.to} end={n.end} className="relative flex flex-1 flex-col items-center justify-center gap-1 text-[10.5px] font-medium">
@@ -379,6 +481,7 @@ class PageBoundary extends Component<{ children: ReactNode }, { error: Error | n
 
 export function Shell() {
   useAppearance();
+  useUpdateNotice();
   const location = useLocation();
   const assistantOpen = useApp((s) => s.assistant.open);
   const setPalette = useApp((s) => s.setPalette);
@@ -412,7 +515,7 @@ export function Shell() {
   }, [location.pathname, setAmbient]);
 
   return (
-    <div className="relative min-h-dvh pb-24 lg:pb-12">
+    <div className="relative min-h-dvh pb-24 sm:pb-12">
       <Ambient />
       <TopBar />
       <motion.main key={location.pathname} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.16, ease: [0.2, 0, 0, 1] }}>

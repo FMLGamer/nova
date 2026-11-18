@@ -155,6 +155,7 @@ export function Chip({ active, onClick, children, className }: { active?: boolea
   return (
     <button
       onClick={onClick}
+      aria-pressed={active ?? false}
       className={cls(
         'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium whitespace-nowrap transition-all duration-200 active:scale-95',
         active ? 'border-transparent bg-white text-black' : 'border-line text-muted hover:border-line-strong hover:text-fg',

@@ -3,6 +3,7 @@ import type { CatalogDetail, CatalogItem, Episode, Row } from '../media/types.js
 import { parseMediaId, stripAnimeSeason } from '../media/types.js';
 import { anilistDetail, anilistEpisodes, anilistRows, anilistSearch } from './anilist.js';
 import { aniZip, toEpisode, zipEpisodes } from './anizip.js';
+import { fillerMarks } from './filler.js';
 import { tmdbDetail, tmdbEpisodes, tmdbFindTv, tmdbRows, tmdbSearch, tmdbTvSeasons } from './tmdb.js';
 
 async function settledRow(
@@ -65,6 +66,15 @@ export function pickTmdbSeason(
 }
 
 async function animeEpisodes(providerId: string): Promise<Episode[]> {
+  const list = await animeEpisodeList(providerId);
+  // Filler only matters for long shows; mark it when MyAnimeList knows.
+  if (list.length < 20) return list;
+  const malId = (await anilistDetail(providerId).catch(() => null))?.malId;
+  const marks = malId ? await fillerMarks(malId) : null;
+  return marks?.size ? list.map((e) => (marks.has(e.episode) ? { ...e, filler: marks.get(e.episode)! } : e)) : list;
+}
+
+async function animeEpisodeList(providerId: string): Promise<Episode[]> {
   const [aniList, zip] = await Promise.all([anilistEpisodes(providerId).catch(() => [] as Episode[]), aniZip(providerId)]);
   const zipped = zipEpisodes(zip);
   if (zipped.size) {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { Link } from 'react-router';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { ChevronLeft, ChevronRight, Clock, Columns3, Rows3 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Clock, Columns3 } from 'lucide-react';
 import { api } from '../lib/api';
 import { cls, fmtAirTime, titlePath } from '../lib/format';
 import { useMyList, usePrefs, useSavePrefs, useSummary } from '../lib/queries';
@@ -9,20 +9,25 @@ import type { AiringEntry } from '../lib/types';
 import { PosterCard, PosterGrid, Rail, RailSkeleton } from '../components/media';
 import { Chip, Segmented, Spinner } from '../components/ui';
 import { HERO_HEIGHT, Hero, pickHero } from '../components/Hero';
-import { PageHeader } from './Browse';
+import { BrowseFilters, BrowseSection, FilterMenu } from '../components/BrowseSection';
+import { useFilterParams } from './Browse';
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const todayIdx = () => (new Date().getDay() + 6) % 7;
 
-function AiringCard({ e, compact }: { e: AiringEntry; compact?: boolean }) {
+function AiringCard({ e, compact, past }: { e: AiringEntry; compact?: boolean; past?: boolean }) {
   const aired = e.airingAt * 1000 <= Date.now();
   return (
-    <Link to={titlePath(e.item.id)} className={cls('group flex gap-3 rounded-2xl p-2 transition-colors hover:bg-white/6', aired && 'opacity-70 hover:opacity-100')}>
+    <Link to={titlePath(e.item.id)} className={cls('group flex gap-3 rounded-2xl p-2 transition-colors hover:bg-white/6', past && 'opacity-60 hover:opacity-100')}>
       <div className={cls('relative shrink-0 overflow-hidden rounded-xl bg-ink-800', compact ? 'h-16 w-11' : 'h-20 w-14')}>
         {e.item.poster && <img src={e.item.poster} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-110" />}
       </div>
       <div className="min-w-0 py-0.5">
-        <div className={cls('text-xs font-semibold tabular-nums', aired ? 'text-faint' : 'text-accent')}>{fmtAirTime(e.airingAt)}</div>
+        <div className={cls('flex items-center gap-1.5 text-xs font-semibold tabular-nums', past ? 'text-faint' : aired ? 'text-ok' : 'text-accent')}>
+          {aired && !past && <span className="size-1.5 rounded-full bg-ok" />}
+          {fmtAirTime(e.airingAt)}
+          {aired && !past && <span className="font-medium">· Out now</span>}
+        </div>
         <div className="line-clamp-2 text-[13px] leading-snug font-semibold">{e.item.title}</div>
         <div className="text-xs text-faint">Episode {e.episode}</div>
       </div>
@@ -40,6 +45,7 @@ function Schedule() {
   const { data, isLoading } = useQuery({ queryKey: ['schedule', week], queryFn: () => api.catalog.schedule(week), staleTime: 30 * 60_000 });
   const list = useMyList();
   const summary = useSummary();
+  const tracked = useQuery({ queryKey: ['tracker-watching'], queryFn: api.trackers.watching, enabled: filter === 'watching', staleTime: 5 * 60_000, retry: false });
   const nowLine = useRef<HTMLDivElement>(null);
 
   const entries = useMemo(() => {
@@ -48,12 +54,17 @@ function Schedule() {
       const ids = new Set((list.data ?? []).map((e) => e.mediaId));
       return all.filter((e) => ids.has(e.item.id));
     }
-    if (filter === 'watching') return all.filter((e) => summary.data?.has(e.item.id));
+    // What you watch in Nova, plus what your AniList / MyAnimeList say you're watching.
+    if (filter === 'watching') {
+      const ids = new Set(tracked.data ?? []);
+      return all.filter((e) => summary.data?.has(e.item.id) || ids.has(e.item.id));
+    }
     return all;
-  }, [data, filter, list.data, summary.data]);
+  }, [data, filter, list.data, summary.data, tracked.data]);
 
   const byDay = useMemo(() => DAYS.map((_, i) => entries.filter((e) => e.weekday === i).sort((a, b) => a.airingAt - b.airingAt)), [entries]);
   const today = week === 0 ? todayIdx() : -1;
+  const isPast = (i: number) => week < 0 || (week === 0 && i < todayIdx());
 
   useEffect(() => {
     if (view === 'timeline') nowLine.current?.scrollIntoView({ block: 'center', behavior: 'smooth' });
@@ -116,7 +127,7 @@ function Schedule() {
         </div>
         <div className="space-y-1">
           {byDay[day]!.map((e) => (
-            <AiringCard key={`${e.item.id}:${e.episode}`} e={e} />
+            <AiringCard key={`${e.item.id}:${e.episode}`} e={e} past={isPast(day)} />
           ))}
           {!isLoading && !byDay[day]!.length && <p className="py-8 text-center text-sm text-muted">Nothing airing{filter !== 'all' ? ' from your shows' : ''}.</p>}
         </div>
@@ -126,15 +137,15 @@ function Schedule() {
       {view === 'columns' ? (
         <div className="hidden grid-cols-7 gap-2 lg:grid">
           {DAYS.map((d, i) => (
-            <div key={d} className={cls('flex min-w-0 flex-col rounded-3xl border p-2', i === today ? 'border-accent/40 bg-accent/[0.06]' : 'border-line bg-white/[0.02]')}>
+            <div key={d} className={cls('flex min-w-0 flex-col rounded-3xl border p-2', i === today ? 'border-accent/50 bg-accent/[0.08] ring-1 ring-accent/20' : 'border-line bg-white/[0.02]')}>
               <div className="px-2 pt-1.5 pb-2">
-                <div className={cls('text-sm font-semibold', i === today && 'text-gradient')}>{i === today ? 'Today' : d}</div>
+                <div className={cls('text-sm font-semibold', i === today ? 'text-gradient' : isPast(i) && 'text-muted')}>{i === today ? 'Today' : d}</div>
                 <div className="text-xs text-faint">{byDay[i]!.length} episodes</div>
               </div>
               <div className="scrollbar-none max-h-[560px] snap-y snap-mandatory space-y-0.5 overflow-y-auto">
                 {byDay[i]!.map((e) => (
                   <div key={`${e.item.id}:${e.episode}`} className="snap-start">
-                    <AiringCard e={e} compact />
+                    <AiringCard e={e} compact past={isPast(i)} />
                   </div>
                 ))}
               </div>
@@ -213,16 +224,10 @@ const FORMATS = [
 ];
 
 function BrowseAnime() {
-  const [params, setParams] = useSearchParams();
+  const [params, set] = useFilterParams();
   const sort = params.get('sort') ?? 'trending';
   const genre = params.get('genre') ?? '';
   const format = params.get('format') ?? '';
-  const set = (k: string, v: string) => {
-    const p = new URLSearchParams(params);
-    if (v) p.set(k, v);
-    else p.delete(k);
-    setParams(p, { replace: true, preventScrollReset: true });
-  };
   const genres = useQuery({ queryKey: ['anime-genres'], queryFn: api.catalog.animeGenres, staleTime: Infinity });
   const q = useInfiniteQuery({
     queryKey: ['anime-browse', sort, genre, format],
@@ -232,31 +237,22 @@ function BrowseAnime() {
     staleTime: 15 * 60_000,
   });
   return (
-    <section id="browse" className="scroll-mt-20">
-      <div className="mb-5 space-y-4 px-5 sm:px-10">
-        <div className="flex flex-wrap items-center gap-3">
-          <h2 className="mr-auto font-display text-2xl font-semibold sm:text-3xl">Browse</h2>
-          <Segmented size="sm" value={sort} onChange={(v) => set('sort', v === 'trending' ? '' : v)} options={SORTS.map((s) => ({ value: s.value, label: s.label }))} />
-        </div>
-        <div className="scrollbar-none -mx-5 flex gap-2 overflow-x-auto px-5 sm:-mx-10 sm:px-10">
-          {FORMATS.map((f) => (
-            <Chip key={f.value} active={format === f.value} onClick={() => set('format', f.value)}>
-              {f.label}
-            </Chip>
-          ))}
-          <span className="mx-1 w-px shrink-0 bg-line" />
-          <Chip active={!genre} onClick={() => set('genre', '')}>
-            Any genre
-          </Chip>
-          {genres.data?.map((g) => (
-            <Chip key={g.id} active={genre === g.id} onClick={() => set('genre', g.id)}>
-              {g.name}
-            </Chip>
-          ))}
-        </div>
-      </div>
+    <BrowseSection
+      title="Browse anime"
+      filters={
+        <BrowseFilters
+          sort={sort as (typeof SORTS)[number]['value']}
+          sorts={SORTS}
+          onSort={(v) => set('sort', v === 'trending' ? '' : v)}
+          extra={<FilterMenu value={format} options={FORMATS} onChange={(v) => set('format', v)} />}
+          genre={genre}
+          genres={(genres.data ?? []).map((g) => ({ value: g.id, label: g.name }))}
+          onGenre={(v) => set('genre', v)}
+        />
+      }
+    >
       <PosterGrid items={q.data?.pages.flat() ?? []} loading={q.isLoading || q.isFetchingNextPage} done={!q.hasNextPage} onEnd={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()} />
-    </section>
+    </BrowseSection>
   );
 }
 
@@ -269,25 +265,10 @@ export default function Anime() {
   }, []);
 
   return (
-    <div className="space-y-14">
+    <div className={cls('space-y-12', !featured && !seasonal.isLoading && 'pt-24 sm:pt-28')}>
       <div>
+        <h1 className="sr-only">Anime</h1>
         {featured ? <Hero item={featured} compact eyebrow="This season" /> : seasonal.isLoading && <div className={`${HERO_HEIGHT.compact} skeleton`} />}
-        <PageHeader
-          flush={Boolean(featured) || seasonal.isLoading}
-          title="Anime"
-          kicker="Simulcasts & seasons"
-          tone="#ff5c7a"
-          subtitle="Simulcasts the moment they land, the whole season's schedule, and every classic worth starting."
-        >
-          <div className="flex gap-2">
-            <a href="#schedule" className="glass inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm hover:bg-white/12">
-              <Clock className="size-4" /> Schedule
-            </a>
-            <a href="#browse" className="glass inline-flex items-center gap-2 rounded-full px-4 py-2 text-sm hover:bg-white/12">
-              <Rows3 className="size-4" /> Browse all
-            </a>
-          </div>
-        </PageHeader>
       </div>
 
       {recent.isLoading ? (

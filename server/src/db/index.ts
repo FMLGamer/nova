@@ -544,6 +544,20 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    // Titles a profile marked "Not interested" in its recommendations.
+    version: 11,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE rec_dismissed (
+          profile_id TEXT NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+          media_id   TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now')),
+          PRIMARY KEY (profile_id, media_id)
+        );
+      `);
+    },
+  },
 ];
 
 function migrate(): void {

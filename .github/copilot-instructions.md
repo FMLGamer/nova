@@ -4,7 +4,7 @@ Nova is a self-hosted media app with three parts:
 
 - **Frontend:** a React PWA in `src/`.
 - **Server:** Express + SQLite in `server/`.
-- **Desktop app:** a Windows Electron shell in `desktop/` that runs that same server locally.
+- **Desktop app:** an Electron shell for Windows, macOS and Linux in `desktop/` that runs that same server locally.
 
 ## Architecture
 
@@ -41,9 +41,17 @@ Nova is a self-hosted media app with three parts:
     list that keeps picture and sound together). Don't drop it.
   - WebTorrent never seeds (`uploads: 0`) and is imported lazily (it is the slowest module to load at startup).
 - **Library:** `LIBRARY_DIR` (downloads) plus "reading folders" (`library_sources`): read-only folders of books, comics
-  and manga whose files are stored as `@<source id>/<path>`; resolve paths with `libraryFilePath()`.
-- **Anime tracking** (`services/trackers.ts`): per-profile AniList (pasted token) and MyAnimeList (OAuth + PKCE, signed
-  `state`) accounts; finished anime episodes are pushed from the progress route. App credentials are integrations.
+  and manga whose files are stored as `@<source id>/<path>`; resolve paths with `libraryFilePath()`. `watchLibrary()`
+  rescans (debounced) when files change.
+- **Tracking** (`services/trackers.ts`): per-profile AniList (pasted token) and MyAnimeList (OAuth + PKCE, signed
+  `state`) accounts, for `anime:<anilist id>` and `manga:<anilist id>` (MAL ids come from AniList). Watched episodes are
+  pushed from the progress route (at `anime.trackAt`%), read chapters from `POST /api/trackers/progress` (the reader,
+  when its plugin source carries `anilist` + `chapter`). Discussion threads are fetched and rendered in-app
+  (`thread()`, sanitized client-side with DOMPurify in `ThreadView`). App credentials are integrations.
+- **Read catalogue** (`services/readCatalog.ts`): AniList MANGA (manga/manhwa/manhua/novel/one-shot) and Open Library
+  (books); `/read/:kind/:id` pages find sources in the server library and plugin search catalogues.
+- **Recommendations** (`services/recommend.ts`): genre/seed scoring over watch history; dismissals in `rec_dismissed`.
+  Stats: `services/stats.ts`.
 - **Matroska:**
   - `server/src/media/matroska.ts` reads tracks, chapters and attachments from the header. It pulls subtitle blocks from
     the clusters near a time, using Cues.
@@ -55,8 +63,12 @@ Nova is a self-hosted media app with three parts:
   `services/tmdb.ts` delegates). Anime: AniList + ani.zip (`services/anizip.ts`) for episodes and cross-ids.
 - **Casting** (`server/src/cast/`): mDNS/SSDP discovery, a minimal Cast v2 sender and a DLNA SOAP client. Streams are
   HLS from ffmpeg (`-copyts`, TS offset 10s) with a WebVTT rendition; ASS is burned in with the `ass` filter, in chunks
-  that follow the subtitle reader on torrents. TVs fetch `/cast/<token>/…` (capability URLs, CORS `*`); the Windows
+  that follow the subtitle reader on torrents. TVs fetch `/cast/<token>/…` (capability URLs, CORS `*`); the desktop
   app serves those on a separate LAN port.
+- **Desktop shell** (`desktop/main.cjs`): window state in `window-state.json`, a transparent title bar overlay (the
+  web UI pads its top bar with `wco-pad` and marks drag areas with `app-drag`), `preload.cjs` exposing
+  `window.novaDesktop` (only to Nova's own origin), electron-updater for the NSIS installer and AppImage, and Discord
+  status (`discord.cjs`, app ID from `build-info.json` written at stage time from `DISCORD_CLIENT_ID`).
 
 ## Conventions
 
@@ -71,4 +83,7 @@ Nova is a self-hosted media app with three parts:
 ## Release
 
 - Pushing to `main` builds `ghcr.io/<owner>/nova:latest` (target `server`) and `:client` (target `client`).
-- Tagging `v*` also builds the Windows installer and portable exe and attaches them to the GitHub release.
+- Tagging `v*` also builds the desktop apps (Windows installer/zip/portable, macOS dmg/zip, Linux AppImage/tar.gz) on a
+  three-OS matrix and attaches them, with the auto-update metadata (`latest*.yml`), to the GitHub release.
+- Bump the version in `package.json`, `server/package.json`, `desktop/package.json` and `VERSION` in
+  `server/src/routes/system.ts`.

@@ -1,8 +1,15 @@
 export type ReaderSource =
   | { type: 'library'; fileId: string; title: string; cover: string | null; author?: string | null; name?: string; manga?: boolean }
   | { type: 'url'; url: string; format: 'epub' | 'pdf' | 'cbz'; title: string; cover: string | null; author?: string | null }
-  | { type: 'plugin'; pluginId: string; metaType: string; videoId: string; title: string; cover: string | null; metaId?: string; series?: string }
+  | { type: 'plugin'; pluginId: string; metaType: string; videoId: string; title: string; cover: string | null; metaId?: string; series?: string; anilist?: number; chapter?: number }
   | { type: 'offline'; itemKey: string; format: 'epub' | 'pdf' | 'cbz'; title: string; cover: string | null };
+
+/** The chapter number of a plugin chapter, from its episode field or its name ("Ch. 12", "Chapter 12.5"). */
+export function chapterOf(v: { episode?: number | null; title?: string | null }): number | undefined {
+  if (v.episode) return v.episode;
+  const m = v.title?.match(/(?:\bch(?:apter)?\.?|#)\s*(\d+(?:\.\d+)?)/i);
+  return m ? Number(m[1]) : undefined;
+}
 
 function hash(s: string): string {
   let h = 5381;

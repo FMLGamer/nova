@@ -139,7 +139,7 @@ export default function AssistantPanel() {
           initial={{ x: 40, opacity: 0 }}
           animate={{ x: 0, opacity: 1 }}
           transition={{ type: 'spring', stiffness: 900, damping: 60 }}
-          className="glass-strong pointer-events-auto absolute top-0 right-0 bottom-0 flex w-full flex-col shadow-[-30px_0_80px_-20px_rgb(0_0_0/0.8)] sm:top-3 sm:right-3 sm:bottom-3 sm:w-[420px] sm:rounded-3xl"
+          className="glass-strong pointer-events-auto absolute top-0 right-0 bottom-0 flex w-full flex-col shadow-[-30px_0_80px_-20px_rgb(0_0_0/0.8)] sm:wco-top sm:right-3 sm:bottom-3 sm:w-[420px] sm:rounded-3xl"
         >
           <div className="flex items-center gap-2 px-4 pt-4 pb-3">
             <span className="bg-gradient-accent grid size-8 place-items-center rounded-xl text-on-accent">

@@ -11,7 +11,6 @@ import { errorText, toast, useApp } from '../lib/store';
 import type { Album } from '../lib/types';
 import { Rail, RailSkeleton } from '../components/media';
 import { Button, Empty, Spinner } from '../components/ui';
-import { Kicker } from './Browse';
 
 function AlbumCard({ a }: { a: Album }) {
   const [broken, setBroken] = useState(false);
@@ -43,7 +42,6 @@ function MusicHome() {
   return (
     <div className="space-y-10 pb-10">
       <div className="px-5 pt-24 sm:px-10 sm:pt-28">
-        <Kicker tone="#b48cff">Albums · Artists</Kicker>
         <h1 className="font-display text-4xl font-bold tracking-tight sm:text-6xl">Music</h1>
         <label className="glass mt-6 flex h-12 max-w-xl items-center gap-3 rounded-2xl px-4">
           <Search className="size-5 text-faint" />

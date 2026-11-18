@@ -38,6 +38,10 @@ export const DEFAULT_PREFERENCES = {
     calendarFilter: 'all' as 'all' | 'mylist' | 'watching',
     // Show every title airing that day as a list beside the carousel.
     scheduleAllTitles: false,
+    // Connected AniList / MyAnimeList: put a show on "Watching" as soon as you start it.
+    trackAutoAdd: true,
+    // ...and count an episode as watched (on those lists) from this much of it, in percent.
+    trackAt: 80,
   },
   ui: {
     autoplayNext: true,
@@ -79,6 +83,18 @@ export const DEFAULT_PREFERENCES = {
     skipIntroAutomatically: false,
     skipCreditsAutomatically: false,
     accent: 'nova', // nova | ember | ocean | aurora | mono
+    // Admins (and the desktop app) hear about new Nova releases.
+    updateNotices: true,
+    // Unwatched episodes keep their titles, stills and descriptions hidden.
+    hideSpoilers: false,
+    // No ratings or scores on cards and title pages.
+    hideScores: false,
+    // Extra CSS applied to this profile's pages.
+    customCss: '',
+    // Subtitle tracks whose names contain one of these are never picked automatically.
+    subtitleIgnore: ['signs & songs', 'signs/songs', 'signs and songs', 'forced'] as string[],
+    // Player keyboard shortcuts that differ from the defaults (action -> key).
+    shortcuts: {} as Record<string, string>,
   },
   reader: {
     typeface: 'literata', // literata | atkinson | dyslexic | serif | sans
@@ -97,7 +113,7 @@ export const DEFAULT_PREFERENCES = {
     // Section order for this profile's Home; unknown ids are ignored.
     sections: [
       'hero', 'continue', 'upnext', 'collections', 'live', 'reading', 'mylist',
-      'trending', 'because', 'new', 'airing',
+      'foryou', 'trending', 'because', 'new', 'airing',
     ] as string[],
     hidden: [] as string[],
   },

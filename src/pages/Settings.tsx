@@ -1,16 +1,18 @@
 import { motion } from 'motion/react';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDown, ArrowUp, Copy, Eye, EyeOff, KeyRound, Link2, Palette, Play, Plus, Sparkles, Subtitles, Trash2, UserRound, House, Gauge, BookOpen, Info, ListChecks } from 'lucide-react';
 import { api } from '../lib/api';
-import { cls, LANGUAGES, relTime, reportIssueUrl } from '../lib/format';
+import { cls, homeSectionOrder, LANGUAGES, relTime, reportIssueUrl } from '../lib/format';
 import { useAppConfig, usePrefs, useProfile, useSavePrefs, useSession } from '../lib/queries';
 import { READING_FONTS } from '../lib/reading-fonts';
 import { errorText, toast } from '../lib/store';
+import { PLATFORM_NAME, desktop, useDesktopInfo, type DesktopSettings } from '../lib/desktop';
 import type { AssistantProvider, Preferences, SubtitleStyle } from '../lib/types';
-import { Avatar, Badge, Button, Card, Chip, Input, Row, Segmented, Select, Slider, Switch, TextArea } from '../components/ui';
+import { Avatar, Badge, Button, Card, Chip, Input, Row, Segmented, Select, Slider, Spinner, Switch, TextArea } from '../components/ui';
 import { cueStyle } from '../components/player/subtitles';
+import { SHORTCUTS, keyLabel, shortcutMap } from '../components/player/shortcuts';
 import { ProfileEditor } from './Profiles';
 import { themeColors } from '../components/reader/common';
 
@@ -24,7 +26,7 @@ const SECTIONS = [
   { id: 'appearance', label: 'Appearance', icon: Palette },
   { id: 'assistant', label: 'Assistant', icon: Sparkles },
   { id: 'account', label: 'Account & sharing', icon: KeyRound },
-  { id: 'tracking', label: 'Anime tracking', icon: ListChecks },
+  { id: 'tracking', label: 'Anime & manga tracking', icon: ListChecks },
   { id: 'about', label: 'About Nova', icon: Info },
 ];
 
@@ -94,6 +96,48 @@ function ProfileSection() {
   );
 }
 
+function ShortcutsGroup({ p, set }: { p: Preferences; set: (x: object) => void }) {
+  const [recording, setRecording] = useState<string | null>(null);
+  const custom = p.ui.shortcuts ?? {};
+  useEffect(() => {
+    if (!recording) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key !== 'Escape' && !['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key)) set({ ui: { shortcuts: { [recording]: e.key.toLowerCase() } } });
+      setRecording(null);
+    };
+    window.addEventListener('keydown', onKey, { capture: true });
+    return () => window.removeEventListener('keydown', onKey, { capture: true });
+  }, [recording, set]);
+  const used = shortcutMap(custom);
+  return (
+    <Group title="Keyboard shortcuts" hint="Click a shortcut, then press the key you want. Esc cancels.">
+      {SHORTCUTS.map((s) => {
+        const keys = custom[s.id] ? [custom[s.id]!] : [...s.keys];
+        const clash = keys.some((k) => used.get(k) !== s.id);
+        return (
+          <Row key={s.id} label={s.label} hint={clash ? 'That key already does something else' : undefined}>
+            <div className="flex items-center gap-2">
+              {custom[s.id] && (
+                <button onClick={() => set({ ui: { shortcuts: { [s.id]: '' } } })} className="text-xs text-muted hover:text-fg">
+                  Reset
+                </button>
+              )}
+              <button
+                onClick={() => setRecording(recording === s.id ? null : s.id)}
+                className={cls('min-w-20 rounded-lg border px-2.5 py-1 font-mono text-xs', recording === s.id ? 'border-accent text-accent' : 'border-line text-fg hover:border-line-strong')}
+              >
+                {recording === s.id ? 'Press a key…' : keys.map(keyLabel).join(' / ')}
+              </button>
+            </div>
+          </Row>
+        );
+      })}
+    </Group>
+  );
+}
+
 function PlaybackSection({ p, set }: { p: Preferences; set: (x: object) => void }) {
   const { data: session } = useSession();
   const ui = p.ui;
@@ -155,6 +199,7 @@ function PlaybackSection({ p, set }: { p: Preferences; set: (x: object) => void 
           <Segmented size="sm" value={ui.externalPlayer || 'none'} onChange={(v) => set({ ui: { externalPlayer: v === 'none' ? '' : v } })} options={[{ value: 'none', label: 'None' }, { value: 'vlc', label: 'VLC' }, { value: 'mpv', label: 'mpv' }, { value: 'iina', label: 'IINA' }]} />
         </Row>
       </Group>
+      <ShortcutsGroup p={p} set={set} />
     </>
   );
 }
@@ -188,6 +233,13 @@ function SubtitlesSection({ p, set }: { p: Preferences; set: (x: object) => void
         </Row>
         <Row label="Translation service">
           <Segmented size="sm" value={p.ui.translateProvider} onChange={(v) => set({ ui: { translateProvider: v } })} options={[{ value: 'google', label: 'Google' }, { value: 'deepl', label: 'DeepL' }, { value: 'assistant', label: 'AI model' }]} />
+        </Row>
+        <Row stack label="Never pick tracks named" hint="Comma-separated. Tracks whose name contains one of these are skipped when subtitles turn on automatically (you can still pick them).">
+          <Input
+            key={p.ui.subtitleIgnore.join(',')}
+            defaultValue={p.ui.subtitleIgnore.join(', ')}
+            onBlur={(e) => set({ ui: { subtitleIgnore: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) } })}
+          />
         </Row>
       </Group>
       <Group title="Look">
@@ -375,6 +427,7 @@ const HOME_LABELS: Record<string, string> = {
   live: 'Live TV favourites',
   reading: 'Keep reading',
   mylist: 'My List',
+  foryou: 'For you',
   trending: 'Trending & popular',
   because: 'Because you watched',
   new: 'Fresh episodes',
@@ -382,7 +435,7 @@ const HOME_LABELS: Record<string, string> = {
 };
 
 function HomeSection({ p, set }: { p: Preferences; set: (x: object) => void }) {
-  const order = [...p.home.sections, ...Object.keys(HOME_LABELS).filter((k) => !p.home.sections.includes(k))];
+  const order = homeSectionOrder(p.home.sections);
   const hidden = new Set(p.home.hidden);
   const move = (i: number, d: number) => {
     const next = [...order];
@@ -440,6 +493,24 @@ function AppearanceSection({ p, set }: { p: Preferences; set: (x: object) => voi
         <Row label="Reduce motion" hint="Turns off page transitions and animated backgrounds.">
           <Switch checked={p.ui.reduceMotion} onChange={(v) => set({ ui: { reduceMotion: v } })} />
         </Row>
+        <Row label="Hide spoilers" hint="Episodes you haven't watched keep their titles, pictures and descriptions hidden.">
+          <Switch checked={p.ui.hideSpoilers} onChange={(v) => set({ ui: { hideSpoilers: v } })} />
+        </Row>
+        <Row label="Hide scores" hint="No ratings on title pages and banners: make up your own mind.">
+          <Switch checked={p.ui.hideScores} onChange={(v) => set({ ui: { hideScores: v } })} />
+        </Row>
+      </Group>
+      <Group title="Custom CSS" hint="Your own styles on top of Nova's, for this profile only. Clear it to undo.">
+        <div className="py-3">
+          <TextArea
+            key={p.ui.customCss}
+            defaultValue={p.ui.customCss}
+            onBlur={(e) => e.target.value !== p.ui.customCss && set({ ui: { customCss: e.target.value } })}
+            className="min-h-32 font-mono text-xs"
+            spellCheck={false}
+            placeholder={':root { --a1: #22d3ee; }\n.font-display { letter-spacing: 0; }'}
+          />
+        </div>
       </Group>
       <Group title="Sections">
         <Row
@@ -668,7 +739,7 @@ function TrackerAccountRow({ name, user, avatar, onDisconnect }: { name: string;
   );
 }
 
-function TrackingSection() {
+function TrackingSection({ p, set }: { p?: Preferences; set: (x: object) => void }) {
   const qc = useQueryClient();
   const status = useQuery({ queryKey: ['trackers'], queryFn: api.trackers.status, refetchOnWindowFocus: true });
   const [token, setToken] = useState('');
@@ -696,7 +767,7 @@ function TrackingSection() {
   const anilistDev = 'https://anilist.co/settings/developer';
   return (
     <>
-      <Group title="AniList" hint="Episodes you finish in Nova are marked on your AniList, and you can change a show's status from its page.">
+      <Group title="AniList" hint="Episodes you finish in Nova and manga chapters you read are marked on your AniList, and you can change a title's status from its page.">
         {s.anilist.connected ? (
           <TrackerAccountRow name="AniList" user={s.anilist.user} avatar={s.anilist.avatar} onDisconnect={() => void disconnect('anilist')} />
         ) : (
@@ -729,7 +800,7 @@ function TrackingSection() {
           </div>
         )}
       </Group>
-      <Group title="MyAnimeList" hint="The same for MyAnimeList: finished episodes update your list.">
+      <Group title="MyAnimeList" hint="The same for MyAnimeList: finished episodes and chapters update your lists.">
         {s.mal.connected ? (
           <TrackerAccountRow name="MyAnimeList" user={s.mal.user} avatar={s.mal.avatar} onDisconnect={() => void disconnect('mal')} />
         ) : s.mal.configured ? (
@@ -752,27 +823,135 @@ function TrackingSection() {
           <p className="py-3 text-sm text-muted">A server admin can turn on MyAnimeList under Server → Overview → Integrations.</p>
         )}
       </Group>
+      {p && (s.anilist.connected || s.mal.connected) && (
+        <Group title="How Nova updates your lists" hint="With both connected, every change goes to both.">
+          <Row label="Add shows I start as “Watching”" hint="A minute into an episode of something you haven't listed (or only planned).">
+            <Switch checked={p.anime.trackAutoAdd} onChange={(v) => set({ anime: { trackAutoAdd: v } })} />
+          </Row>
+          <Row label="Count an episode as watched at" stack>
+            <Slider value={p.anime.trackAt} min={50} max={100} step={5} onChange={(v) => set({ anime: { trackAt: v } })} format={(v) => `${v}%`} />
+          </Row>
+        </Group>
+      )}
     </>
   );
 }
 
-function AboutSection() {
+function UpdateRow() {
+  const { data: session } = useSession();
+  const [info] = useDesktopInfo();
+  const [fresh, setFresh] = useState(false);
+  const release = useQuery({ queryKey: ['app-update', fresh], queryFn: () => api.system.update(fresh), staleTime: 30 * 60_000 });
+  const u = info?.update;
+  if (u?.supported && u.status !== 'idle' && u.status !== 'none') {
+    return (
+      <Row
+        label={u.status === 'ready' ? `Nova ${u.version} is ready` : u.status === 'checking' ? 'Checking for updates…' : u.status === 'downloading' ? `Downloading Nova ${u.version ?? ''}` : 'The update check failed'}
+        hint={u.status === 'ready' ? 'It installs when you close Nova, or right now.' : u.status === 'downloading' ? `${Math.round((u.progress ?? 0) * 100)}%` : u.error}
+      >
+        {u.status === 'ready' ? (
+          <Button size="sm" variant="white" onClick={() => void desktop?.installUpdate()}>
+            Restart now
+          </Button>
+        ) : u.status === 'error' ? (
+          <Button size="sm" onClick={() => void desktop?.checkForUpdates()}>
+            Try again
+          </Button>
+        ) : (
+          <Spinner className="size-4" />
+        )}
+      </Row>
+    );
+  }
+  const r = release.data;
+  return (
+    <Row
+      label={r?.available ? `Nova ${r.latest!.version} is out` : release.isFetching ? 'Checking for updates…' : r?.latest ? "You're up to date" : 'Updates'}
+      hint={
+        r?.available
+          ? desktop
+            ? 'Download it from the release page and install it over this one; your data stays.'
+            : session?.account.isAdmin
+              ? 'Pull the new image and restart the container; your data stays.'
+              : 'Your server admin can update Nova.'
+          : r?.latest
+            ? `Latest release: ${r.latest.version}`
+            : 'Nova can check its project page for new releases.'
+      }
+    >
+      {r?.available ? (
+        <a href={r.latest!.url} target="_blank" rel="noreferrer">
+          <Button size="sm" variant="white">
+            {desktop ? 'Download' : "What's new"}
+          </Button>
+        </a>
+      ) : (
+        <Button
+          size="sm"
+          loading={release.isFetching}
+          onClick={() => {
+            if (u?.supported) void desktop?.checkForUpdates();
+            setFresh(true);
+            void release.refetch();
+          }}
+        >
+          Check now
+        </Button>
+      )}
+    </Row>
+  );
+}
+
+function AboutSection({ p, set }: { p?: Preferences; set: (x: object) => void }) {
   const { data: cfg } = useAppConfig();
+  const { data: session } = useSession();
+  const [info, setInfo] = useDesktopInfo();
   if (!cfg) return null;
   const link = (href: string, label: string) => (
     <a href={href} target="_blank" rel="noreferrer">
       <Button size="sm">{label}</Button>
     </a>
   );
+  const setDesktop = async (patch: Partial<DesktopSettings>) => {
+    const settings = await desktop!.setSettings(patch);
+    setInfo((i) => (i ? { ...i, settings } : i));
+  };
   return (
-    <Group title="About Nova" hint="Nova is open source. Found a bug or missing something? Let us know.">
-      <Row label="Version">{cfg.version}</Row>
-      <Row label="Running as">{cfg.mode === 'desktop' ? 'Windows app' : 'Server'}</Row>
-      <Row label="Report a problem" hint="Opens a new issue with your Nova version and browser already filled in.">
-        {link(reportIssueUrl(cfg), 'Report')}
-      </Row>
-      <Row label="Source code & releases">{link(cfg.projectUrl, 'Open')}</Row>
-    </Group>
+    <>
+      <Group title="About Nova" hint="Nova is open source. Found a bug or missing something? Let us know.">
+        <Row label="Version">{cfg.version}</Row>
+        <Row label="Running as">{cfg.mode === 'desktop' ? (PLATFORM_NAME[desktop?.platform ?? ''] ?? 'Desktop app') : 'Server'}</Row>
+        <Row label="Report a problem" hint="Opens a new issue with your Nova version and browser already filled in.">
+          {link(reportIssueUrl(cfg), 'Report')}
+        </Row>
+        <Row label="Source code & releases">{link(cfg.projectUrl, 'Open')}</Row>
+      </Group>
+      <Group title="Updates">
+        <UpdateRow />
+        {info ? (
+          <Row
+            label="Check for updates automatically"
+            hint={info.update.supported ? 'New versions download in the background and install the next time you close Nova.' : 'Nova tells you when a new version is out.'}
+          >
+            <Switch checked={info.settings.autoUpdate} onChange={(v) => void setDesktop({ autoUpdate: v })} />
+          </Row>
+        ) : (
+          session?.account.isAdmin &&
+          p && (
+            <Row label="Tell me about new versions" hint="A notice when a new Nova release is out.">
+              <Switch checked={p.ui.updateNotices} onChange={(v) => set({ ui: { updateNotices: v } })} />
+            </Row>
+          )
+        )}
+      </Group>
+      {info?.discordAvailable && (
+        <Group title="Discord" hint="While Discord runs on this computer, your status shows what you're watching or reading.">
+          <Row label="Show what I'm watching">
+            <Switch checked={info.settings.discord} onChange={(v) => void setDesktop({ discord: v })} />
+          </Row>
+        </Group>
+      )}
+    </>
   );
 }
 
@@ -803,8 +982,8 @@ export default function Settings() {
         <motion.div key={active.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl pb-10">
           {active.id === '' && <ProfileSection />}
           {active.id === 'account' && <AccountSection />}
-          {active.id === 'about' && <AboutSection />}
-          {active.id === 'tracking' && <TrackingSection />}
+          {active.id === 'about' && <AboutSection p={prefs} set={set} />}
+          {active.id === 'tracking' && <TrackingSection p={prefs} set={set} />}
           {active.id === 'assistant' && <AssistantSection />}
           {prefs && active.id === 'playback' && <PlaybackSection p={prefs} set={set} />}
           {prefs && active.id === 'subtitles' && <SubtitlesSection p={prefs} set={set} />}

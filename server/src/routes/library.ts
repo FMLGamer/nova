@@ -4,7 +4,8 @@ import { requireAuth, requireProfile } from '../auth/middleware.js';
 import { asyncHandler } from '../lib/async.js';
 import { parse } from '../lib/http.js';
 import { detailFor } from '../services/catalog.js';
-import { trackWatched } from '../services/trackers.js';
+import { trackStarted, trackWatched } from '../services/trackers.js';
+import { getPreferences } from '../services/profiles.js';
 import {
   addToList,
   continueWatching,
@@ -75,7 +76,12 @@ progressRouter.put('/', (req, res) => {
   const body = parse(progressSchema, req.body);
   res.json({ progress: upsertProgress(req.profile!.id, body) });
   // Connected AniList / MyAnimeList lists follow along (in the background; never blocks the save).
-  if (body.finished && body.mediaType === 'anime' && body.episode != null) void trackWatched(req.profile!.id, body.mediaId, body.episode).catch(() => undefined);
+  if (body.mediaType === 'anime' && body.episode != null) {
+    const { anime } = getPreferences(req.profile!.id);
+    const share = body.durationSeconds ? body.positionSeconds / body.durationSeconds : 0;
+    if (body.finished || share >= anime.trackAt / 100) void trackWatched(req.profile!.id, body.mediaId, body.episode).catch(() => undefined);
+    else if (anime.trackAutoAdd && body.positionSeconds >= 60) void trackStarted(req.profile!.id, body.mediaId).catch(() => undefined);
+  }
 });
 
 progressRouter.delete('/:itemKey', (req, res) => {
@@ -105,6 +111,8 @@ listRouter.post('/', (req, res) => {
 });
 
 listRouter.delete('/:mediaType/:mediaId', (req, res) => {
-  removeFromList(req.profile!.id, req.params.mediaType, req.params.mediaId);
+  const { mediaType, mediaId } = req.params;
+  // Rows store the full id ("movie:tt0111161"); older clients sent only the part after the colon.
+  removeFromList(req.profile!.id, mediaType, mediaId.includes(':') ? mediaId : `${mediaType}:${mediaId}`);
   res.status(204).end();
 });

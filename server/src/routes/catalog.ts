@@ -9,6 +9,7 @@ import { getSkipTimes } from '../services/aniskip.js';
 import { downloadSubtitleVtt, searchSubtitles, subtitlesConfigured } from '../services/subtitles.js';
 import { activePlugins } from '../plugins/manager.js';
 import { pluginSubtitleVtt, pluginSubtitles } from '../plugins/subtitles.js';
+import { freeEdition, readBrowse, readDetail, readGenres } from '../services/readCatalog.js';
 import { HttpError } from '../lib/http.js';
 
 export const catalogRouter = Router();
@@ -87,6 +88,33 @@ catalogRouter.get(
       format: q(req.query.format),
     });
     res.json({ items });
+  }),
+);
+
+/** The Read tab's catalogue: manga & novels (AniList) and books (Open Library). */
+catalogRouter.get(
+  '/read/browse',
+  asyncHandler(async (req, res) => {
+    res.json({ items: await readBrowse({ format: q(req.query.format), sort: q(req.query.sort), genre: q(req.query.genre), page: Number(req.query.page) || 1 }) });
+  }),
+);
+
+catalogRouter.get('/read/genres', (req, res) => {
+  res.json({ genres: readGenres(q(req.query.format)) });
+});
+
+catalogRouter.get(
+  '/read/free',
+  asyncHandler(async (req, res) => {
+    const title = q(req.query.title);
+    res.json({ epub: title ? await freeEdition(title, q(req.query.author) ?? null) : null });
+  }),
+);
+
+catalogRouter.get(
+  '/read/:kind/:id',
+  asyncHandler(async (req, res) => {
+    res.json(await readDetail(req.params.kind, req.params.id));
   }),
 );
 

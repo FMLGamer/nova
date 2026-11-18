@@ -71,6 +71,7 @@ export function withProfile(path: string): string {
 export const api = {
   system: {
     config: () => get<T.AppConfig>('/api/config'),
+    update: (fresh?: boolean) => get<T.AppUpdate>(`/api/update${fresh ? '?fresh=1' : ''}`),
     pairings: () => get<{ pairings: T.EnginePairing[] }>('/api/engine-pairings').then((r) => r.pairings),
     unpair: (id: string) => del(`/api/engine-pairings/${enc(id)}`),
   },
@@ -106,6 +107,10 @@ export const api = {
     animeBrowse: (q: { page: number; genre?: string; sort?: string; format?: string }) =>
       get<{ items: T.CatalogItem[] }>('/api/catalog/anime/browse', q).then((r) => r.items),
     animeRecent: () => get<{ items: T.CatalogItem[] }>('/api/catalog/anime/recent').then((r) => r.items),
+    readBrowse: (q: { page: number; format?: string; genre?: string; sort?: string }) => get<{ items: T.ReadItem[] }>('/api/catalog/read/browse', q).then((r) => r.items),
+    readGenres: (format: string) => get<{ genres: string[] }>('/api/catalog/read/genres', { format }).then((r) => r.genres),
+    readDetail: (kind: string, id: string) => get<T.ReadDetail>(`/api/catalog/read/${enc(kind)}/${enc(id)}`),
+    readFree: (title: string, author: string | null) => get<{ epub: string | null }>('/api/catalog/read/free', { title, ...(author ? { author } : {}) }).then((r) => r.epub),
     schedule: (week: number) => get<{ schedule: T.AiringEntry[] }>('/api/catalog/anime/schedule', { week }).then((r) => r.schedule),
     search: (q: string) => get<{ movies: T.CatalogItem[]; shows: T.CatalogItem[]; anime: T.CatalogItem[] }>('/api/catalog/search', { q }),
     because: (mediaId: string) => {
@@ -149,13 +154,13 @@ export const api = {
     all: () => get<{ items: T.ListEntry[] }>('/api/list').then((r) => r.items),
     add: (b: { mediaType: string; mediaId: string; title?: string | null; poster?: string | null; year?: number | null }) =>
       post('/api/list', b),
-    remove: (mediaId: string) => {
-      const [t, id] = mediaId.split(':');
-      return del(`/api/list/${t}/${enc(id ?? '')}`);
-    },
+    remove: (mediaId: string) => del(`/api/list/${enc(mediaId.split(':')[0] ?? '')}/${enc(mediaId)}`),
   },
 
   me: {
+    stats: () => get<T.ProfileStats>('/api/me/stats'),
+    recommendations: () => get<T.Recommendations>('/api/me/recommendations'),
+    dismissRecommendation: (mediaId: string) => post('/api/me/recommendations/dismiss', { mediaId }),
     notifications: () => get<{ notifications: T.Notification[] }>('/api/me/notifications').then((r) => r.notifications),
     readNotifications: () => post('/api/me/notifications/read'),
     tokens: () => get<{ tokens: T.ApiToken[] }>('/api/me/tokens').then((r) => r.tokens),
@@ -226,9 +231,13 @@ export const api = {
     malAuthorize: () => get<{ url: string }>('/api/trackers/mal/authorize').then((r) => r.url),
     disconnect: (service: 'anilist' | 'mal') => del(`/api/trackers/${service}`),
     entry: (mediaId: string) => get<T.TrackEntries>(`/api/trackers/entry/${enc(mediaId)}`),
-    setEntry: (mediaId: string, b: { status?: T.TrackStatus; progress?: number }) => put<T.TrackEntries>(`/api/trackers/entry/${enc(mediaId)}`, b),
+    setEntry: (mediaId: string, b: { status?: T.TrackStatus; progress?: number; score?: number | null }) => put<T.TrackEntries>(`/api/trackers/entry/${enc(mediaId)}`, b),
     discussions: (mediaId: string, episode: number) =>
       get<{ discussions: T.Discussion[] }>(`/api/trackers/discussions/${enc(mediaId)}`, { episode }).then((r) => r.discussions),
+    thread: (site: 'anilist' | 'mal', id: number, page = 1) => get<T.Thread>(`/api/trackers/thread/${site}/${id}`, { page }),
+    lists: (kind: 'anime' | 'manga' = 'anime') => get<{ items: T.TrackedShow[] }>('/api/trackers/lists', { kind }).then((r) => r.items),
+    watching: () => get<{ ids: string[] }>('/api/trackers/watching').then((r) => r.ids),
+    progress: (mediaId: string, progress: number) => post<{ ok: true }>('/api/trackers/progress', { mediaId, progress }),
   },
 
   server: {

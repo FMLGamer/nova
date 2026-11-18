@@ -25,6 +25,8 @@ export interface Episode {
   still: string | null;
   airDate: string | null;
   runtime: number | null;
+  /** Anime: known filler or recap episode. */
+  filler?: 'filler' | 'recap' | null;
 }
 
 export interface Season {

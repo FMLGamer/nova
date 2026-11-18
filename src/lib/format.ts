@@ -101,10 +101,24 @@ export function reportIssueUrl(cfg: Pick<AppConfig, 'projectUrl' | 'version' | '
     '1. ',
     '',
     '---',
-    `Nova ${cfg.version} · ${cfg.mode === 'desktop' ? 'Windows app' : `server (torrents: ${cfg.torrentMode})`}`,
+    `Nova ${cfg.version} · ${cfg.mode === 'desktop' ? 'desktop app' : `server (torrents: ${cfg.torrentMode})`}`,
     `Browser: ${navigator.userAgent}`,
   ].join('\n');
   return `${cfg.projectUrl}/issues/new?${new URLSearchParams({ body })}`;
+}
+
+export const HOME_SECTIONS = ['hero', 'continue', 'upnext', 'collections', 'live', 'reading', 'mylist', 'foryou', 'trending', 'because', 'new', 'airing'];
+
+/** A profile's saved Home order, with sections added since it was saved slotted in where they belong. */
+export function homeSectionOrder(saved: string[] | undefined): string[] {
+  if (!saved) return HOME_SECTIONS;
+  const out = [...saved];
+  HOME_SECTIONS.forEach((id, i) => {
+    if (out.includes(id)) return;
+    const before = HOME_SECTIONS.slice(0, i).reverse().find((p) => out.includes(p));
+    out.splice(before ? out.indexOf(before) + 1 : 0, 0, id);
+  });
+  return out;
 }
 
 export function kindLabel(t: string): string {

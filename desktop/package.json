@@ -1,8 +1,8 @@
 {
   "name": "nova-desktop",
   "productName": "Nova",
-  "version": "2.3.1",
-  "description": "Nova for Windows: your media, your plugins, streamed on your own computer.",
+  "version": "2.4.0",
+  "description": "Nova for desktop: your media, your plugins, streamed on your own computer.",
   "license": "MIT",
   "author": "Nova contributors",
   "private": true,
@@ -10,7 +10,7 @@
   "scripts": {
     "stage": "node scripts/stage.mjs",
     "start": "electron .",
-    "dist": "node scripts/stage.mjs && electron-builder --win nsis portable zip --publish never"
+    "dist": "node scripts/stage.mjs && electron-builder --publish never"
   },
   "devDependencies": {
     "electron": "45.3.3",
@@ -31,6 +31,8 @@
     },
     "files": [
       "main.cjs",
+      "preload.cjs",
+      "discord.cjs",
       "package.json"
     ],
     "extraResources": [
@@ -39,6 +41,7 @@
         "to": "app"
       }
     ],
+    "afterPack": "scripts/after-pack.cjs",
     "win": {
       "icon": "build/icon.ico",
       "artifactName": "Nova-${version}-win.${ext}",
@@ -46,6 +49,36 @@
         "nsis",
         "portable",
         "zip"
+      ]
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.entertainment",
+      "identity": null,
+      "artifactName": "Nova-${version}-mac-${arch}.${ext}",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "category": "AudioVideo",
+      "synopsis": "Movies, shows, anime, live TV and books in one place",
+      "artifactName": "Nova-${version}-linux-${arch}.${ext}",
+      "target": [
+        "AppImage",
+        "tar.gz"
       ]
     },
     "nsis": {
@@ -61,5 +94,8 @@
       "splashImage": "build/splash.bmp",
       "useZip": true
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.12"
   }
 }

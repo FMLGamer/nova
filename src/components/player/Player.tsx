@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
   AudioLines,
+  Camera,
   Captions,
   Cast,
   ChevronRight,
@@ -34,6 +35,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../../lib/api';
+import { desktop, publicImage, setPresence } from '../../lib/desktop';
 import { cls, episodeLabel, fmtBytes, fmtClock, fmtSpeed, langName, matchesLanguage } from '../../lib/format';
 import { useOffline } from '../../lib/offline';
 import { useContributions, useEpisodes, usePrefs, useSavePrefs, useSession } from '../../lib/queries';
@@ -45,6 +47,7 @@ import { useAssRenderer } from './ass';
 import { useRoom } from './room';
 import { cueStyle, cuesAt, useSubtitleTrack, type SubtitleSource } from './subtitles';
 import { CastDevices, CastRemote, type ActiveCast, type CastPick } from './Cast';
+import { eventKey, shortcutMap } from './shortcuts';
 import { browserCast, castApi, type CastSubtitle } from '../../lib/cast';
 
 export interface Playable {
@@ -71,7 +74,7 @@ export interface PlayerProps {
   itemKey: string;
   detail?: CatalogDetail;
   episodes: Episode[];
-  next: { season: number | null; episode: number; title: string; still: string | null } | null;
+  next: { season: number | null; episode: number; title: string; still: string | null; label?: string } | null;
   startAt: number;
   roomCode: string | null;
   wantRoom: boolean;
@@ -109,7 +112,7 @@ function Panel({ title, onClose, children }: { title: string; onClose: () => voi
       exit={{ x: 40, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 900, damping: 60 }}
       onClick={(e) => e.stopPropagation()}
-      className="glass-strong absolute top-3 right-3 bottom-24 z-40 flex w-[min(400px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-3xl shadow-2xl max-sm:top-auto max-sm:right-0 max-sm:bottom-0 max-sm:max-h-[70%] max-sm:w-full max-sm:rounded-b-none"
+      className="glass-strong wco-top absolute right-3 bottom-24 z-40 flex w-[min(400px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-3xl shadow-2xl max-sm:top-auto max-sm:right-0 max-sm:bottom-0 max-sm:max-h-[70%] max-sm:w-full max-sm:rounded-b-none"
     >
       <div className="flex items-center justify-between px-5 pt-4 pb-2">
         <h3 className="font-display text-lg font-semibold">{title}</h3>
@@ -258,9 +261,9 @@ export function Player(p: PlayerProps) {
     compatChecked.current = true;
     const audio = tracks.audio.find((a) => a.default) ?? tracks.audio[0];
     const videoOk = !tracks.video || videoCodecPlayable(tracks.video.codec);
-    // Dual-audio files: switch to the language you asked for when it isn't the default track.
-    const wantLang = p.mediaType === 'anime' ? prefs?.anime.audioLanguages[0] : prefs?.torrent.preferredLanguages[0];
-    const preferred = wantLang && tracks.audio.length > 1 ? tracks.audio.find((a) => matchesLanguage(wantLang, a.language, a.title)) : undefined;
+    // Dual-audio files: switch to the first language you asked for that the file has.
+    const wanted = (p.mediaType === 'anime' ? prefs?.anime.audioLanguages : prefs?.torrent.preferredLanguages) ?? [];
+    const preferred = tracks.audio.length > 1 ? wanted.map((l) => tracks.audio.find((a) => matchesLanguage(l, a.language, a.title))).find(Boolean) : undefined;
     if (preferred && preferred !== audio && videoOk) {
       switchMode(mode === 'transcode' ? 'transcode' : 'remux', { track: preferred.index });
       return;
@@ -410,6 +413,29 @@ export function Player(p: PlayerProps) {
       else await v.requestPictureInPicture();
     } catch {
       toast('Picture-in-picture is not available here', 'bad');
+    }
+  };
+
+  /** Saves the current frame as a PNG (the picture only, without subtitles or controls). */
+  const screenshot = async () => {
+    const v = videoRef.current;
+    if (!v?.videoWidth) return;
+    try {
+      const c = document.createElement('canvas');
+      c.width = v.videoWidth;
+      c.height = v.videoHeight;
+      c.getContext('2d')!.drawImage(v, 0, 0);
+      const blob = await new Promise<Blob | null>((resolve) => c.toBlob(resolve, 'image/png'));
+      if (!blob) throw new Error('empty');
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `${[p.title, episodeLabel(p.mediaType, p.season, p.episode), fmtClock(timeRef.current).replace(/:/g, '.')].filter(Boolean).join(' - ')}.png`;
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+      showFlash(<Camera className="size-8" />);
+    } catch {
+      // Streams from another origin (a paired desktop engine) can't be read back into a canvas.
+      toast("Screenshots aren't possible for this stream", 'bad');
     }
   };
 
@@ -609,21 +635,24 @@ export function Player(p: PlayerProps) {
     subPicked.current = true;
     const audio = tracks?.audio.find((a) => a.default) ?? tracks?.audio[0];
     if (audio && matchesLanguage(subLang, audio.language, audio.title) && p.mediaType !== 'anime') return;
+    // "Signs & Songs" and forced tracks only translate on-screen text: never the automatic choice.
+    const ignore = (prefs.ui.subtitleIgnore ?? []).map((x) => x.toLowerCase()).filter(Boolean);
+    const pickable = embedded.filter((s) => !ignore.some((x) => s.label.toLowerCase().includes(x)));
     const pick = async () => {
-      const own = embedded.find((s) => matchesLanguage(subLang, s.lang, s.label));
+      const own = pickable.find((s) => matchesLanguage(subLang, s.lang, s.label));
       if (own) return own;
       const os = await searchOs([subLang, secondLang, 'en'].filter(Boolean).join(','));
       const exact = os.find((o) => o.match === 'exact' && matchesLanguage(subLang, o.language)) ?? os.find((o) => matchesLanguage(subLang, o.language));
       if (exact) return osSource(exact);
       if (prefs.ui.translateSubtitles) {
-        const base = embedded[0] ?? (os[0] ? osSource(os[0]) : null);
+        const base = pickable[0] ?? (os[0] ? osSource(os[0]) : null);
         if (base) return translated(base, subLang);
       }
       return null;
     };
     void pick().then((s) => s && setSubChoice(s));
     if (secondLang) {
-      const second = embedded.find((s) => matchesLanguage(secondLang, s.lang, s.label));
+      const second = pickable.find((s) => matchesLanguage(secondLang, s.lang, s.label));
       if (second) setSubSecondary(second);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -704,35 +733,68 @@ export function Player(p: PlayerProps) {
   }, [p.wantRoom, started]);
 
   // -------------------------------------------------------------- keyboard
+  const keys = useMemo(() => shortcutMap(prefs?.ui.shortcuts), [prefs?.ui.shortcuts]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.metaKey || e.ctrlKey) return;
       if (cast) return;
       const v = videoRef.current;
       if (!v) return;
-      const k = e.key.toLowerCase();
-      if (k === ' ' || k === 'k') {
-        e.preventDefault();
-        togglePlay();
-        broadcast(v.paused ? 'play' : 'pause');
-      } else if (k === 'f') toggleFullscreen();
-      else if (k === 'm') v.muted = !v.muted;
-      else if (k === 'arrowleft' || k === 'j') seekTo(timeRef.current - (k === 'j' ? 10 : 5));
-      else if (k === 'arrowright' || k === 'l') seekTo(timeRef.current + (k === 'l' ? 10 : 5));
-      else if (k === 'arrowup') {
-        e.preventDefault();
-        setVol(v.volume + 0.1);
-      } else if (k === 'arrowdown') {
-        e.preventDefault();
-        setVol(v.volume - 0.1);
-      } else if (k === 'n' && p.next) p.onNext();
-      else if (k === 's' && (inOp || inEd)) seekTo((inOp ? op!.end : ed!.end) + 0.2);
-      else if (k === 'p') void togglePip();
-      else if (k === 'c') setSubChoice((s) => (s ? null : (embedded[0] ?? null)));
-      else if (k === 'escape') {
+      const k = eventKey(e);
+      if (k === 'escape') {
         if (panel) setPanel(null);
         else if (!document.fullscreenElement) p.onBack();
-      } else return;
+        return poke();
+      }
+      const action = keys.get(k);
+      if (!action) return;
+      if (action === 'playPause' || action.startsWith('volume')) e.preventDefault();
+      switch (action) {
+        case 'playPause':
+          togglePlay();
+          broadcast(v.paused ? 'play' : 'pause');
+          break;
+        case 'fullscreen':
+          toggleFullscreen();
+          break;
+        case 'mute':
+          v.muted = !v.muted;
+          break;
+        case 'back5':
+        case 'back10':
+          seekTo(timeRef.current - (action === 'back10' ? 10 : 5));
+          break;
+        case 'forward5':
+        case 'forward10':
+          seekTo(timeRef.current + (action === 'forward10' ? 10 : 5));
+          break;
+        case 'volumeUp':
+          setVol(v.volume + 0.1);
+          break;
+        case 'volumeDown':
+          setVol(v.volume - 0.1);
+          break;
+        case 'next':
+          if (p.next) p.onNext();
+          break;
+        case 'skip':
+          if (inOp || inEd) seekTo((inOp ? op!.end : ed!.end) + 0.2);
+          break;
+        case 'pip':
+          void togglePip();
+          break;
+        case 'subtitles':
+          setSubChoice((s) => (s ? null : (embedded[0] ?? null)));
+          break;
+        case 'faster':
+        case 'slower':
+          v.playbackRate = Math.max(0.25, Math.min(3, Math.round((v.playbackRate + (action === 'faster' ? 0.25 : -0.25)) * 100) / 100));
+          showFlash(<span className="font-display text-xl font-bold">{v.playbackRate}×</span>);
+          break;
+        case 'screenshot':
+          void screenshot();
+          break;
+      }
       poke();
     };
     window.addEventListener('keydown', onKey);
@@ -768,6 +830,22 @@ export function Player(p: PlayerProps) {
   const subtitleLine = [episodeLabel(p.mediaType, p.season, p.episode), p.episodeTitle].filter(Boolean).join(' · ');
   const saveJob = offline.jobs[p.itemKey];
   const savedOffline = offline.entries.some((e) => e.itemKey === p.itemKey);
+
+  // Discord status (desktop app): re-sent on play/pause and seeks, not every tick.
+  const [seeks, setSeeks] = useState(0);
+  useEffect(() => {
+    if (!videoEl || !desktop) return;
+    const on = () => setSeeks((n) => n + 1);
+    videoEl.addEventListener('seeked', on);
+    return () => videoEl.removeEventListener('seeked', on);
+  }, [videoEl]);
+  useEffect(() => {
+    if (!desktop || !started) return;
+    const now = Date.now() / 1000;
+    setPresence({ kind: 'watching', title: p.title, subtitle: subtitleLine || null, image: publicImage(p.detail?.poster), paused: !playing, start: now - time, end: duration ? now - time + duration : undefined });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [started, playing, p.title, subtitleLine, Math.floor(duration), seeks]);
+  useEffect(() => () => setPresence(null), []);
 
   const external = async (kind: 'vlc' | 'mpv' | 'iina' | 'copy' | 'm3u') => {
     try {
@@ -1073,7 +1151,7 @@ export function Player(p: PlayerProps) {
             >
               {p.next.still && <img src={p.next.still} alt="" className="aspect-video w-full object-cover" />}
               <div className="p-3.5">
-                <div className="text-xs text-faint">Next · {episodeLabel(p.mediaType, p.next.season, p.next.episode)}</div>
+                <div className="text-xs text-faint">{p.next.label ?? `Next · ${episodeLabel(p.mediaType, p.next.season, p.next.episode)}`}</div>
                 <div className="mt-0.5 truncate font-semibold">{p.next.title}</div>
               </div>
               {countdown != null && (
@@ -1107,28 +1185,30 @@ export function Player(p: PlayerProps) {
         <div className="absolute inset-x-0 bottom-0 h-56 bg-gradient-to-t from-black/90 via-black/50 to-transparent" />
 
         <div
-          className={cls('absolute inset-x-0 top-0 flex items-center gap-3 px-4 pt-safe-5 sm:px-8 sm:pt-safe-7', chromeOn && 'pointer-events-auto')}
+          className={cls('wco-pad absolute inset-x-0 top-0', chromeOn && 'app-drag pointer-events-auto')}
           onPointerEnter={() => (hoverChrome.current = true)}
           onPointerLeave={() => (hoverChrome.current = false)}
         >
-          <button onClick={p.onBack} aria-label="Back" className="grid size-11 place-items-center rounded-full hover:bg-white/10">
-            <ArrowLeft className="size-6" />
-          </button>
-          <div className="min-w-0 flex-1">
-            <div className="truncate font-display text-lg font-semibold">{p.title}</div>
-            {subtitleLine && <div className="truncate text-sm text-white/65">{subtitleLine}</div>}
+          <div className="flex items-center gap-3 px-4 pt-safe-5 sm:px-8 sm:pt-safe-7">
+            <button onClick={p.onBack} aria-label="Back" className="grid size-11 place-items-center rounded-full hover:bg-white/10">
+              <ArrowLeft className="size-6" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-display text-lg font-semibold">{p.title}</div>
+              {subtitleLine && <div className="truncate text-sm text-white/65">{subtitleLine}</div>}
+            </div>
+            {p.roomCode && (
+              <button onClick={() => setPanel('room')} className="glass flex items-center gap-2 rounded-full py-1.5 pr-3 pl-2 text-sm">
+                <span className={cls('size-2 rounded-full', room.connected ? 'bg-ok' : 'bg-warn')} />
+                <Users className="size-4" /> {room.members.length}
+              </button>
+            )}
+            {!isOffline && (
+              <button onClick={p.onSources} className="glass hidden items-center gap-2 rounded-full px-3.5 py-1.5 text-xs text-white/80 hover:text-white sm:flex">
+                <ListVideo className="size-4" /> {playable.label ?? 'Sources'}
+              </button>
+            )}
           </div>
-          {p.roomCode && (
-            <button onClick={() => setPanel('room')} className="glass flex items-center gap-2 rounded-full py-1.5 pr-3 pl-2 text-sm">
-              <span className={cls('size-2 rounded-full', room.connected ? 'bg-ok' : 'bg-warn')} />
-              <Users className="size-4" /> {room.members.length}
-            </button>
-          )}
-          {!isOffline && (
-            <button onClick={p.onSources} className="glass hidden items-center gap-2 rounded-full px-3.5 py-1.5 text-xs text-white/80 hover:text-white sm:flex">
-              <ListVideo className="size-4" /> {playable.label ?? 'Sources'}
-            </button>
-          )}
         </div>
 
         <div
@@ -1238,6 +1318,9 @@ export function Player(p: PlayerProps) {
                 <Cast className="size-5" />
               </button>
             )}
+            <button onClick={() => void screenshot()} aria-label="Screenshot" title="Screenshot" className="grid size-10 place-items-center rounded-full hover:bg-white/10 max-sm:hidden">
+              <Camera className="size-5" />
+            </button>
             <button onClick={togglePip} aria-label="Picture in picture" className="grid size-10 place-items-center rounded-full hover:bg-white/10 max-sm:hidden">
               <PictureInPicture2 className="size-5" />
             </button>
@@ -1281,6 +1364,8 @@ export function Player(p: PlayerProps) {
             <div className="space-y-1">
               {panelEpisodes.map((e) => {
                 const current = e.episode === p.episode && e.season === (p.season ?? e.season);
+                const ahead = e.season > (p.season ?? e.season) || (e.season === (p.season ?? e.season) && e.episode > (p.episode ?? 0));
+                const veiled = Boolean(prefs?.ui.hideSpoilers) && ahead;
                 return (
                   <button
                     key={e.id}
@@ -1288,16 +1373,18 @@ export function Player(p: PlayerProps) {
                       // Inline refs re-run on every render (several per second while playing).
                       if (current && el && !episodeScrolled.current) {
                         episodeScrolled.current = true;
-                        el.scrollIntoView({ block: 'center' });
+                        // Scroll the panel only: scrollIntoView also scrolls the page and the player box, which made everything jump.
+                        const list = el.closest<HTMLElement>('.overflow-y-auto');
+                        if (list) list.scrollTop += el.getBoundingClientRect().top - list.getBoundingClientRect().top - (list.clientHeight - el.offsetHeight) / 2;
                       }
                     }}
                     onClick={() => p.onEpisode(e.season, e.episode)}
                     className={cls('flex w-full gap-3 rounded-2xl p-2 text-left transition-colors', current ? 'bg-white/12' : 'hover:bg-white/6')}
                   >
-                    <div className="aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-white/5">{e.still && <img src={e.still} alt="" loading="lazy" className="size-full object-cover" />}</div>
+                    <div className="aspect-video w-28 shrink-0 overflow-hidden rounded-lg bg-white/5">{e.still && <img src={e.still} alt="" loading="lazy" className={cls('size-full object-cover', veiled && 'scale-110 blur-lg')} />}</div>
                     <div className="min-w-0 py-0.5">
                       <div className="text-xs text-faint">{episodeLabel(p.mediaType, e.season, e.episode)}</div>
-                      <div className="truncate text-sm font-medium">{e.title}</div>
+                      <div className="truncate text-sm font-medium">{veiled ? `Episode ${e.episode}` : e.title}</div>
                     </div>
                   </button>
                 );

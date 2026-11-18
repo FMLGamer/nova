@@ -168,6 +168,24 @@ input[type='range'] {
   padding-bottom: max(env(safe-area-inset-bottom), --spacing(--value(integer)));
 }
 
+/* The desktop app draws its own title bar: the top bar moves the window, and keeps clear of the window buttons
+   (titlebar-area-* only exist when the window controls overlay is on; elsewhere these resolve to 0). */
+@utility app-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+  & :is(a, button, input, select, textarea, [role='dialog'], .glass, .glass-strong) {
+    -webkit-app-region: no-drag;
+    app-region: no-drag;
+  }
+}
+@utility wco-pad {
+  padding-left: calc(env(titlebar-area-x, 0px) + var(--wco-px, 0px));
+  padding-right: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw) + var(--wco-px, 0px));
+}
+@utility wco-top {
+  top: max(0.75rem, calc(env(titlebar-area-y, 0px) + env(titlebar-area-height, 0px) + 0.25rem));
+}
+
 .font-display {
   font-optical-sizing: auto;
   letter-spacing: -0.02em;
@@ -193,6 +211,11 @@ input[type='range'] {
   cursor: none !important;
 }
 
+/* Settings → Appearance → Hide scores. */
+[data-hide-scores='true'] .nova-score {
+  display: none !important;
+}
+
 /* Rendered plugin markup is untrusted CSS-wise but trusted structurally. */
 .prose-nova p { margin: 0.6em 0; }
 .prose-nova a { color: var(--a1); text-decoration: underline; text-underline-offset: 3px; }
@@ -200,3 +223,16 @@ input[type='range'] {
 .prose-nova ul { list-style: disc; padding-left: 1.2em; }
 .prose-nova ol { list-style: decimal; padding-left: 1.2em; }
 .prose-nova strong { color: white; }
+
+/* Forum posts read inside Nova (AniList / MyAnimeList). */
+.thread-html p { margin: 0.45em 0; }
+.thread-html a { color: var(--a1); text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.thread-html img { max-width: 100%; max-height: 420px; height: auto; border-radius: 10px; margin: 0.4em auto; }
+.thread-html center { display: block; text-align: center; }
+.thread-html blockquote { margin: 0.5em 0; padding: 0.3em 0.8em; border-left: 3px solid rgb(255 255 255 / 0.15); color: rgb(255 255 255 / 0.7); }
+.thread-html h1, .thread-html h2, .thread-html h3 { font-weight: 600; margin: 0.6em 0 0.3em; }
+.thread-html ul { list-style: disc; padding-left: 1.2em; }
+.thread-html ol { list-style: decimal; padding-left: 1.2em; }
+.thread-html code { background: rgb(255 255 255 / 0.08); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em; }
+.thread-html .markdown_spoiler { cursor: pointer; border-radius: 4px; background: rgb(255 255 255 / 0.1); filter: blur(5px); transition: filter 0.15s; }
+.thread-html .markdown_spoiler.revealed { filter: none; background: transparent; }

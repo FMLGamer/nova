@@ -14,8 +14,9 @@ import { db } from '../db/index.js';
 import { signToken, verifyToken, randomToken } from '../lib/crypto.js';
 import { HttpError } from '../lib/http.js';
 import { asyncHandler } from '../lib/async.js';
+import { cached, forget } from '../lib/cache.js';
 
-export const VERSION = '2.3.1';
+export const VERSION = '2.4.0';
 
 export const systemRouter = Router();
 
@@ -30,6 +31,38 @@ systemRouter.get('/config', (_req, res) => {
     projectUrl: config.projectUrl,
   });
 });
+
+const newer = (a: string, b: string) => {
+  const pa = a.split(/[.-]/).map((x) => Number(x) || 0);
+  const pb = b.split(/[.-]/).map((x) => Number(x) || 0);
+  for (let i = 0; i < 3; i++) if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) > (pb[i] ?? 0);
+  return false;
+};
+
+/** The newest release of the project (from PROJECT_URL when it's a GitHub repository). */
+systemRouter.get(
+  '/update',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const m = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(config.projectUrl);
+    if (!m) {
+      res.json({ current: VERSION, latest: null, available: false });
+      return;
+    }
+    const key = `release:${m[1]}/${m[2]}`;
+    if (req.query.fresh) forget(key);
+    const latest = await cached(key, 6 * 3600_000, async () => {
+      const r = await fetch(`https://api.github.com/repos/${m[1]}/${m[2]}/releases/latest`, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Nova/${VERSION}` },
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!r.ok) return null;
+      const j = (await r.json()) as { tag_name?: string; html_url?: string; body?: string; published_at?: string };
+      return { version: String(j.tag_name ?? '').replace(/^v/, ''), url: String(j.html_url ?? config.projectUrl), notes: String(j.body ?? '').slice(0, 4000), publishedAt: j.published_at ?? null };
+    }).catch(() => null);
+    res.json({ current: VERSION, latest, available: Boolean(latest?.version && newer(latest.version, VERSION)) });
+  }),
+);
 
 const isLoopback = (req: Request) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress ?? '');
 

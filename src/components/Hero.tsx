@@ -100,7 +100,7 @@ export function Hero({ item, eyebrow, compact }: { item: CatalogItem; eyebrow?: 
             </motion.h1>
             <motion.div variants={rise} className={cls('flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-white/80', compact ? 'mt-2.5' : 'mt-4')}>
               {item.rating != null && item.rating > 0 && (
-                <span className="flex items-center gap-1 font-semibold text-white">
+                <span className="nova-score flex items-center gap-1 font-semibold text-white">
                   <Star className="size-3.5 fill-amber-300 text-amber-300" /> {item.rating.toFixed(1)}
                 </span>
               )}

@@ -1,4 +1,4 @@
-name: Windows app
+name: Desktop apps
 
 on:
   push:
@@ -7,9 +7,17 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
-    permissions:
-      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+          - os: ubuntu-latest
+            name: linux
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
@@ -23,24 +31,43 @@ jobs:
           npm --prefix server ci
           npm --prefix desktop ci
 
-      # Stages the built UI, the compiled server with its dependencies, this
-      # Node runtime and ffmpeg, then packages the installer, portable exe and zip.
+      # Stages the built UI, the compiled server with its dependencies, this Node runtime and ffmpeg,
+      # then packages the platform's installers. The publish settings only say where updates are found
+      # (latest*.yml); nothing is uploaded from this step.
       - name: Build
-        run: npm --prefix desktop run dist
+        shell: bash
+        env:
+          DISCORD_CLIENT_ID: ${{ vars.DISCORD_CLIENT_ID }}
+        run: |
+          npm --prefix desktop run stage
+          cd desktop
+          npx electron-builder --publish never \
+            -c.publish.provider=github \
+            -c.publish.owner=${{ github.repository_owner }} \
+            -c.publish.repo=${{ github.event.repository.name }}
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nova-windows
+          name: nova-${{ matrix.name }}
           path: |
-            desktop/release/*.exe
-            desktop/release/*.zip
-            desktop/release/*.blockmap
+            desktop/release/Nova-*
+            desktop/release/latest*.yml
+          if-no-files-found: error
+
+  release:
+    # Attach whatever built, so one failing platform doesn't hold back the others.
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/') }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            desktop/release/Nova-Setup-*.exe
-            desktop/release/Nova-Portable-*.exe
-            desktop/release/Nova-*-win.zip
+          files: dist/*

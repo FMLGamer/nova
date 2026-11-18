@@ -125,6 +125,7 @@ export function addSource(input: { name?: string; path: string; kind: SourceKind
   }
   const id = newId();
   db.prepare('INSERT INTO library_sources (id, name, path, kind) VALUES (?, ?, ?, ?)').run(id, input.name?.trim() || path.basename(dir) || dir, dir, input.kind);
+  watchLibrary();
   return listSources().find((s) => s.id === id)!;
 }
 
@@ -133,6 +134,7 @@ export function removeSource(id: string): void {
   db.prepare('DELETE FROM library_files WHERE path LIKE ?').run(`@${id}/%`);
   db.prepare('DELETE FROM library_items WHERE id NOT IN (SELECT DISTINCT item_id FROM library_files)').run();
   db.prepare('DELETE FROM library_sources WHERE id = ?').run(id);
+  watchLibrary();
 }
 
 /** Absolute path of a stored library file, or null when it points outside its folder. */
@@ -477,6 +479,39 @@ function scanRoots(): ScanRoot[] {
 }
 
 const UNMATCHED_KINDS = new Set<LibraryKind>(['comic', 'manga', 'music']);
+
+// ---------------------------------------------------------------- watching folders
+
+let watchers: fs.FSWatcher[] = [];
+let watchTimer: NodeJS.Timeout | null = null;
+
+/**
+ * New or removed files show up within seconds instead of at the next scheduled scan. Downloads in
+ * progress (.incoming) and partial files are ignored; the scheduled scan stays as a safety net for
+ * file systems that don't report changes (some network shares).
+ */
+export function watchLibrary(): void {
+  for (const w of watchers) w.close();
+  watchers = [];
+  for (const root of scanRoots()) {
+    if (!isDir(root.dir)) continue;
+    try {
+      const w = fs.watch(root.dir, { recursive: true, persistent: false }, (_event, name) => {
+        const file = String(name ?? '');
+        if (!file || /(^|[\\/])\.incoming([\\/]|$)/.test(file) || /\.(part|tmp|crdownload|!qb)$/i.test(file)) return;
+        if (watchTimer) clearTimeout(watchTimer);
+        watchTimer = setTimeout(() => {
+          watchTimer = null;
+          void scanLibrary().catch((err: unknown) => console.error('[library] scan after change failed:', err instanceof Error ? err.message : err));
+        }, 8000);
+      });
+      w.on('error', () => w.close());
+      watchers.push(w);
+    } catch (err) {
+      console.warn(`[library] can't watch ${root.dir}:`, err instanceof Error ? err.message : err);
+    }
+  }
+}
 
 /** Picks up files dropped into the library volume and the reading folders, and matches them to metadata. */
 export async function scanLibrary(): Promise<{ added: number; review: number; removed: number }> {

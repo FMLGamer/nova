@@ -1,9 +1,9 @@
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { BookOpen, Play } from 'lucide-react';
 import { useEffect } from 'react';
 import { api } from '../lib/api';
-import { readerPath } from '../lib/reader';
+import { chapterOf, readerPath } from '../lib/reader';
 import { titlePath } from '../lib/format';
 import { useContributions } from '../lib/queries';
 import { errorText, toast, useApp } from '../lib/store';
@@ -11,17 +11,18 @@ import type { CatalogDef, MetaPreview } from '../lib/types';
 import { Rail, RailSkeleton } from '../components/media';
 import { Button, Empty, Spinner } from '../components/ui';
 
-/** Opens a plugin catalogue item: Nova's own title page when the id maps, the plugin page otherwise. */
+/** Opens a plugin catalogue item: Nova's own title page when the id maps, the plugin page otherwise.
+ *  `anilist` (a manga's AniList id) lets the reader move the user's manga lists forward. */
 export function useOpenMeta() {
   const navigate = useNavigate();
-  return async (pluginId: string, m: MetaPreview) => {
+  return async (pluginId: string, m: MetaPreview, anilist?: number) => {
     try {
       const mediaId = await api.catalog.resolve(m.id, m.type);
       if (mediaId) return navigate(titlePath(mediaId));
     } catch {
       /* fall through to the plugin's own page */
     }
-    navigate(`/x/${encodeURIComponent(pluginId)}/${encodeURIComponent(m.type)}/${encodeURIComponent(m.id)}`);
+    navigate(`/x/${encodeURIComponent(pluginId)}/${encodeURIComponent(m.type)}/${encodeURIComponent(m.id)}${anilist ? `?al=${anilist}` : ''}`);
   };
 }
 
@@ -59,6 +60,7 @@ export function PluginRail({ catalog }: { catalog: CatalogDef & { pluginId: stri
 
 export default function PluginMeta() {
   const { plugin = '', type = '', id = '' } = useParams();
+  const [params] = useSearchParams();
   const navigate = useNavigate();
   const setAmbient = useApp((s) => s.setAmbient);
   const { data: contrib } = useContributions();
@@ -71,8 +73,21 @@ export default function PluginMeta() {
   if (isLoading) return <div className="grid min-h-[60vh] place-items-center"><Spinner className="size-7" /></div>;
   if (error || !meta) return <Empty title="Couldn't open this">{errorText(error)}</Empty>;
 
-  const openChapter = (videoId: string, title: string) =>
-    navigate(readerPath({ type: 'plugin', pluginId: plugin, metaType: type, videoId, metaId: id, series: meta.name, title: `${meta.name} — ${title}`, cover: meta.poster ?? null }));
+  const openChapter = (v: { id: string; title: string; episode?: number | null }) =>
+    navigate(
+      readerPath({
+        type: 'plugin',
+        pluginId: plugin,
+        metaType: type,
+        videoId: v.id,
+        metaId: id,
+        series: meta.name,
+        title: `${meta.name} — ${v.title}`,
+        cover: meta.poster ?? null,
+        anilist: Number(params.get('al')) || undefined,
+        chapter: chapterOf(v),
+      }),
+    );
 
   const videos = [...(meta.videos ?? [])].sort((a, b) => (a.season ?? 0) - (b.season ?? 0) || (a.episode ?? 0) - (b.episode ?? 0));
 
@@ -85,7 +100,7 @@ export default function PluginMeta() {
           <div className="mt-2 text-sm text-muted">{[meta.releaseInfo, ...(meta.genres ?? []).slice(0, 4)].filter(Boolean).join(' · ')}</div>
           {meta.description && <p className="mt-4 max-w-3xl leading-relaxed text-white/80">{meta.description}</p>}
           {readable && videos[0] && (
-            <Button className="mt-6" variant="white" size="lg" icon={<BookOpen className="size-5" />} onClick={() => openChapter(videos[0]!.id, videos[0]!.title)}>
+            <Button className="mt-6" variant="white" size="lg" icon={<BookOpen className="size-5" />} onClick={() => openChapter(videos[0]!)}>
               Start reading
             </Button>
           )}
@@ -104,7 +119,7 @@ export default function PluginMeta() {
             {videos.map((v) => (
               <button
                 key={v.id}
-                onClick={() => (readable ? openChapter(v.id, v.title) : toast('Not playable from a plugin page'))}
+                onClick={() => (readable ? openChapter(v) : toast('Not playable from a plugin page'))}
                 className="flex items-center gap-3 rounded-2xl border border-line p-3 text-left transition hover:border-line-strong hover:bg-white/4"
               >
                 {v.thumbnail ? <img src={v.thumbnail} alt="" className="h-12 w-20 shrink-0 rounded-lg object-cover" /> : <span className="grid h-12 w-12 shrink-0 place-items-center rounded-lg bg-white/6 text-muted">{readable ? <BookOpen className="size-4" /> : <Play className="size-4" />}</span>}

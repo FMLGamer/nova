@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router';
 import { api } from '../lib/api';
 import { HERO_HEIGHT, Hero, pickHero } from '../components/Hero';
 import { PosterGrid } from '../components/media';
-import { Chip, Segmented } from '../components/ui';
+import { BrowseFilters, BrowseSection } from '../components/BrowseSection';
 
 const SORTS = [
   { value: 'popularity.desc', label: 'Popular' },
@@ -12,53 +12,23 @@ const SORTS = [
   { value: 'newest', label: 'Newest' },
 ] as const;
 
-export function Kicker({ children, tone }: { children: React.ReactNode; tone?: string }) {
-  return (
-    <div className="mb-2.5 flex items-center gap-2.5 text-[11px] font-semibold tracking-[0.24em] text-muted uppercase">
-      <span className="h-[3px] w-5 rounded-full" style={{ background: tone ?? 'var(--a1)' }} />
-      {children}
-    </div>
-  );
-}
-
-export function PageHeader({
-  title,
-  subtitle,
-  kicker,
-  tone,
-  flush,
-  children,
-}: {
-  title: string;
-  subtitle?: string;
-  kicker?: string;
-  /** Per-tab signature colour for the kicker rule. */
-  tone?: string;
-  /** Sits under a hero instead of the top bar. */
-  flush?: boolean;
-  children?: React.ReactNode;
-}) {
-  return (
-    <div className={flush ? 'relative z-10 px-5 pt-2 pb-6 sm:px-10' : 'px-5 pt-24 pb-6 sm:px-10 sm:pt-28'}>
-      {kicker && <Kicker tone={tone}>{kicker}</Kicker>}
-      <h1 className={flush ? 'font-display text-3xl font-bold tracking-tight sm:text-4xl' : 'font-display text-4xl font-bold tracking-tight sm:text-6xl'}>{title}</h1>
-      {subtitle && <p className="mt-2 max-w-xl text-muted">{subtitle}</p>}
-      {children && <div className="mt-6">{children}</div>}
-    </div>
-  );
-}
-
-export function Browse({ kind }: { kind: 'movies' | 'shows' }) {
+/** Search params as filter state (replace, so filters don't pile up in history). */
+export function useFilterParams() {
   const [params, setParams] = useSearchParams();
-  const genre = params.get('genre') ?? '';
-  const sort = params.get('sort') ?? 'popularity.desc';
-  const apiSort = sort === 'newest' ? (kind === 'movies' ? 'primary_release_date.desc' : 'first_air_date.desc') : sort;
   const set = (k: string, v: string) => {
     const p = new URLSearchParams(params);
     if (v) p.set(k, v);
     else p.delete(k);
-    setParams(p, { replace: true });
+    setParams(p, { replace: true, preventScrollReset: true });
   };
+  return [params, set] as const;
+}
+
+export function Browse({ kind }: { kind: 'movies' | 'shows' }) {
+  const [params, set] = useFilterParams();
+  const genre = params.get('genre') ?? '';
+  const sort = params.get('sort') ?? 'popularity.desc';
+  const apiSort = sort === 'newest' ? (kind === 'movies' ? 'primary_release_date.desc' : 'first_air_date.desc') : sort;
 
   const genres = useQuery({ queryKey: ['genres', kind], queryFn: () => api.catalog.genres(kind === 'movies' ? 'movie' : 'tv'), staleTime: Infinity });
   const q = useInfiniteQuery({
@@ -74,32 +44,29 @@ export function Browse({ kind }: { kind: 'movies' | 'shows' }) {
 
   return (
     <div>
+      <h1 className="sr-only">{kind === 'movies' ? 'Movies' : 'Shows'}</h1>
       {featured ? (
         <Hero item={featured} compact eyebrow={kind === 'movies' ? 'Featured film' : 'Featured series'} />
       ) : (
         q.isLoading && <div className={`${HERO_HEIGHT.compact} skeleton`} />
       )}
-      <PageHeader
-        flush={Boolean(featured) || q.isLoading}
-        title={kind === 'movies' ? 'Movies' : 'Shows'}
-        kicker={kind === 'movies' ? 'Feature films' : 'Series & seasons'}
-        tone={kind === 'movies' ? '#f5b544' : '#4fb3ff'}
+      <BrowseSection
+        top={!featured && !q.isLoading}
+        className={featured || q.isLoading ? 'mt-12' : undefined}
+        title={kind === 'movies' ? 'Browse movies' : 'Browse shows'}
+        filters={
+          <BrowseFilters
+            sort={sort as (typeof SORTS)[number]['value']}
+            sorts={SORTS}
+            onSort={(v) => set('sort', v === 'popularity.desc' ? '' : v)}
+            genre={genre}
+            genres={(genres.data ?? []).map((g) => ({ value: String(g.id), label: g.name }))}
+            onGenre={(v) => set('genre', v)}
+          />
+        }
       >
-        <div className="flex flex-col gap-4">
-          <Segmented value={sort} onChange={(v) => set('sort', v === 'popularity.desc' ? '' : v)} options={SORTS.map((s) => ({ value: s.value, label: s.label }))} className="self-start" />
-          <div className="scrollbar-none -mx-5 flex gap-2 overflow-x-auto px-5 sm:-mx-10 sm:px-10">
-            <Chip active={!genre} onClick={() => set('genre', '')}>
-              All
-            </Chip>
-            {genres.data?.map((g) => (
-              <Chip key={g.id} active={genre === String(g.id)} onClick={() => set('genre', String(g.id))}>
-                {g.name}
-              </Chip>
-            ))}
-          </div>
-        </div>
-      </PageHeader>
-      <PosterGrid items={items} loading={q.isLoading || q.isFetchingNextPage} done={!q.hasNextPage} onEnd={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()} />
+        <PosterGrid items={items} loading={q.isLoading || q.isFetchingNextPage} done={!q.hasNextPage} onEnd={() => q.hasNextPage && !q.isFetchingNextPage && q.fetchNextPage()} />
+      </BrowseSection>
     </div>
   );
 }

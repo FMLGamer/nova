@@ -12,7 +12,10 @@ import {
   malAuthorizeUrl,
   malCallback,
   setEntries,
+  thread,
+  trackedLists,
   trackerStatus,
+  trackWatched,
 } from '../services/trackers.js';
 
 export const trackersRouter = Router();
@@ -77,8 +80,9 @@ trackersRouter.get(
 );
 
 const entrySchema = z.object({
-  status: z.enum(['watching', 'completed', 'planning', 'paused', 'dropped']).optional(),
+  status: z.enum(['watching', 'rewatching', 'completed', 'planning', 'paused', 'dropped']).optional(),
   progress: z.number().int().min(0).max(100000).optional(),
+  score: z.number().min(0).max(10).nullable().optional(),
 });
 
 trackersRouter.put(
@@ -96,5 +100,48 @@ trackersRouter.get(
     const episode = Number(req.query.episode);
     if (!Number.isInteger(episode) || episode < 1) throw new HttpError(400, 'Which episode?');
     res.json({ discussions: await discussions(decodeURIComponent(req.params.mediaId), episode) });
+  }),
+);
+
+trackersRouter.get(
+  '/thread/:site/:id',
+  asyncHandler(async (req, res) => {
+    const site = req.params.site;
+    const id = Number(req.params.id);
+    if ((site !== 'anilist' && site !== 'mal') || !Number.isInteger(id) || id < 1) throw new HttpError(404, 'Unknown thread');
+    const page = Math.min(200, Math.max(1, Number(req.query.page) || 1));
+    res.json(await thread(site, id, page));
+  }),
+);
+
+/** A chapter (or episode) finished somewhere Nova can't see the progress itself, e.g. the reader. */
+trackersRouter.post(
+  '/progress',
+  asyncHandler(async (req, res) => {
+    const { mediaId, progress } = parse(z.object({ mediaId: z.string().regex(/^(anime|manga):\d+$/), progress: z.number().int().min(1).max(100000) }), req.body);
+    await trackWatched(req.profile!.id, mediaId, progress);
+    res.json({ ok: true });
+  }),
+);
+
+/** Every title on the connected anime (or ?kind=manga) lists (Library → Anime & manga). */
+trackersRouter.get(
+  '/lists',
+  asyncHandler(async (req, res) => {
+    res.json({ items: await trackedLists(req.profile!.id, req.query.kind === 'manga' ? 'manga' : 'anime') });
+  }),
+);
+
+/** Anime ids the connected lists have on Watching / Rewatching (the schedule's filter). */
+trackersRouter.get(
+  '/watching',
+  asyncHandler(async (req, res) => {
+    const s = trackerStatus(req.profile!.id);
+    if (!s.anilist.connected && !s.mal.connected) {
+      res.json({ ids: [] });
+      return;
+    }
+    const items = await trackedLists(req.profile!.id).catch(() => []);
+    res.json({ ids: items.filter((i) => i.status === 'watching' || i.status === 'rewatching').map((i) => i.mediaId) });
   }),
 );
