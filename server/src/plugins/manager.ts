@@ -344,6 +344,11 @@ function sealConfig(manifest: PluginManifest, values: Record<string, unknown>, p
   for (const f of configFields(manifest)) {
     if (!(f.key in values)) continue;
     const v = values[f.key];
+    // null: back to the plugin's default.
+    if (v === null) {
+      delete out[f.key];
+      continue;
+    }
     if (f.type === 'password') {
       // An unchanged mask means "keep the stored secret".
       if (v === '••••••••') continue;

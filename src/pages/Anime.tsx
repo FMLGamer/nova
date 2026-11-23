@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useInfiniteQuery, useQueries, useQuery } from '@tanstack/react-query';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Columns3 } from 'lucide-react';
-import { api, retryUpstream } from '../lib/api';
+import { api } from '../lib/api';
 import { cls, fmtAirTime, titlePath } from '../lib/format';
 import { useMyList, usePrefs, useSavePrefs, useSummary } from '../lib/queries';
 import type { AiringEntry } from '../lib/types';
@@ -67,7 +67,7 @@ function useScheduleFilter(entries: AiringEntry[]) {
   const filter = prefs?.anime.calendarFilter ?? 'all';
   const list = useMyList();
   const summary = useSummary();
-  const tracked = useQuery({ queryKey: ['tracker-watching'], queryFn: api.trackers.watching, enabled: filter === 'watching', staleTime: 5 * 60_000, retry: retryUpstream });
+  const tracked = useQuery({ queryKey: ['tracker-watching'], queryFn: api.trackers.watching, enabled: filter === 'watching', staleTime: 5 * 60_000 });
   return useMemo(() => {
     if (filter === 'mylist') {
       const ids = new Set((list.data ?? []).map((e) => e.mediaId));
@@ -83,7 +83,7 @@ function useScheduleFilter(entries: AiringEntry[]) {
 }
 
 function WeekView({ week, view }: { week: number; view: 'columns' | 'timeline' }) {
-  const { data, isLoading } = useQuery({ queryKey: ['schedule', week], queryFn: () => api.catalog.schedule(week), staleTime: 30 * 60_000, retry: retryUpstream });
+  const { data, isLoading } = useQuery({ queryKey: ['schedule', week], queryFn: () => api.catalog.schedule(week), staleTime: 30 * 60_000 });
   const { data: prefs } = usePrefs();
   const filtered = useScheduleFilter(data ?? []);
   const isWatched = useWatchedEpisode();
@@ -236,7 +236,7 @@ function MonthView({ month, onOpenWeek }: { month: number; onOpenWeek: (week: nu
   const weeksShown = Math.ceil(((new Date(first.getFullYear(), first.getMonth() + 1, 0).getTime() - gridStart.getTime()) / DAY_MS + 1) / 7);
   const firstWeek = Math.round((gridStart.getTime() - mondayOf(0).getTime()) / (7 * DAY_MS));
   const weeks = Array.from({ length: weeksShown }, (_, i) => firstWeek + i);
-  const results = useQueries({ queries: weeks.map((w) => ({ queryKey: ['schedule', w], queryFn: () => api.catalog.schedule(w), staleTime: 30 * 60_000, retry: retryUpstream })) });
+  const results = useQueries({ queries: weeks.map((w) => ({ queryKey: ['schedule', w], queryFn: () => api.catalog.schedule(w), staleTime: 30 * 60_000 })) });
   const all = useMemo(() => {
     const seen = new Set<string>();
     return results.flatMap((r) => r.data ?? []).filter((e) => {
@@ -317,10 +317,12 @@ function Schedule() {
   const { data: prefs } = usePrefs();
   const savePrefs = useSavePrefs();
   const monthBeta = Boolean(prefs?.beta?.monthSchedule);
-  const [range, setRange] = useState<'week' | 'month'>('week');
+  const range = prefs?.anime.scheduleRange ?? 'week';
+  const setRange = (v: 'week' | 'month') => savePrefs.mutate({ anime: { scheduleRange: v } });
   const [week, setWeek] = useState(0);
   const [month, setMonth] = useState(0);
-  const [view, setView] = useState<'columns' | 'timeline'>('columns');
+  const view = prefs?.anime.scheduleView ?? 'columns';
+  const setView = (v: 'columns' | 'timeline') => savePrefs.mutate({ anime: { scheduleView: v } });
   const filter = prefs?.anime.calendarFilter ?? 'all';
   const mode = monthBeta ? range : 'week';
   const offset = mode === 'week' ? week : month;
@@ -461,7 +463,7 @@ function BrowseAnime() {
 }
 
 export default function Anime() {
-  const seasonal = useQuery({ queryKey: ['anime-row', 'seasonal'], queryFn: () => api.catalog.anime('seasonal'), staleTime: 30 * 60_000, retry: retryUpstream });
+  const seasonal = useQuery({ queryKey: ['anime-row', 'seasonal'], queryFn: () => api.catalog.anime('seasonal'), staleTime: 30 * 60_000 });
   const featured = useMemo(() => pickHero(seasonal.data, 20), [seasonal.data]);
   useEffect(() => {
     if (location.hash === '#schedule') window.setTimeout(() => document.getElementById('schedule')?.scrollIntoView({ behavior: 'smooth' }), 400);

@@ -2,6 +2,31 @@
 
 What changed in each Nova release. Each release on GitHub shows its section of this file.
 
+## [2.6.0] - 2026-11-23
+
+### New
+- **HDR interface** switch for the Windows app (Settings → Appearance → HDR). Off by default: Nova now tells Windows Auto
+  HDR to leave its interface alone, so it no longer flips between SDR and HDR while you scroll, switch pages or pause.
+  HDR videos and RTX Video HDR still play in HDR. Turn it on if you prefer Auto HDR's brighter look (after a restart).
+- When AniList, TMDB or another service Nova depends on is busy or unreachable, a message says which one, why (with the
+  error code) and when Nova tries again; it then retries by itself.
+- API keys under Server → Overview → Integrations can be removed again, and plugin settings can go back to their
+  default.
+
+### Changed
+- Catalogue answers (AniList, TMDB, Cinemeta and others) are kept between restarts and refreshed in the background, so the
+  Anime tab and Home load right away after starting Nova instead of waiting on rate limits. The Anime tab also needs far
+  fewer AniList requests: Latest episodes is built from the schedule, and past weeks are fetched only once.
+- The Anime tab remembers how you left the schedule (columns or timeline, week or month).
+- The desktop app's port setting moved to Server → Overview, next to the other server settings. Servers show their port
+  there too.
+
+### Fixed
+- A paused video on an HDR screen no longer flashes between HDR and SDR (the controls' blur took the picture off its HDR
+  layer).
+- YouTube's own title bar and play buttons no longer show for a few seconds when a banner trailer starts, loops or
+  resumes.
+
 ## [2.5.0] - 2026-11-18
 
 ### New

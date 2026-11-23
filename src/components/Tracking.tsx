@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ExternalLink } from 'lucide-react';
-import { api, retryUpstream } from '../lib/api';
+import { api } from '../lib/api';
 import { errorText, toast } from '../lib/store';
 import type { TrackedShow, TrackEntry, TrackStatus } from '../lib/types';
 import { Button, Chip, Input, Modal, Slider, Spinner } from './ui';
@@ -23,7 +23,7 @@ export function useTrackersConnected() {
 }
 
 export function useTrackEntry(mediaId: string | null, enabled: boolean) {
-  return useQuery({ queryKey: ['track-entry', mediaId], queryFn: () => api.trackers.entry(mediaId!), enabled: Boolean(enabled && mediaId), staleTime: 60_000, retry: retryUpstream });
+  return useQuery({ queryKey: ['track-entry', mediaId], queryFn: () => api.trackers.entry(mediaId!), enabled: Boolean(enabled && mediaId), staleTime: 60_000 });
 }
 
 const NO_TRACKED = new Map<string, TrackedShow>();
@@ -36,7 +36,6 @@ export function useTrackedAnime(): Map<string, TrackedShow> {
     queryFn: () => api.trackers.lists('anime'),
     enabled: connected,
     staleTime: 5 * 60_000,
-    retry: retryUpstream,
     select: (items) => new Map(items.map((i) => [i.mediaId, i])),
   });
   return data ?? NO_TRACKED;

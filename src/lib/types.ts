@@ -152,6 +152,8 @@ export interface Preferences {
     addAllToCalendar: boolean;
     preferredGroups: string[];
     calendarFilter: 'all' | 'mylist' | 'watching';
+    scheduleView: 'columns' | 'timeline';
+    scheduleRange: 'week' | 'month';
     scheduleAllTitles: boolean;
     trackAutoAdd: boolean;
     trackAt: number;
@@ -1103,6 +1105,8 @@ export interface AdminOverview {
     version: string;
     sandbox: boolean;
     hwAccel: string | null;
+    port: number;
+    portFromEnv: boolean;
     library: LibraryStatus;
     plugins: { total: number; pending: number };
     approvals: number;

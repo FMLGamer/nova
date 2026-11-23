@@ -8,7 +8,7 @@ import { cls, LANGUAGES, relTime, reportIssueUrl } from '../lib/format';
 import { useAppConfig, usePrefs, useProfile, useSavePrefs, useSession } from '../lib/queries';
 import { READING_FONTS } from '../lib/reading-fonts';
 import { errorText, toast } from '../lib/store';
-import { PLATFORM_NAME, desktop, useDesktopInfo, type DesktopInfo, type DesktopSettings } from '../lib/desktop';
+import { PLATFORM_NAME, desktop, useDesktopInfo, type DesktopSettings } from '../lib/desktop';
 import { androidApp, switchServer } from '../lib/mobile';
 import type { AssistantProvider, Preferences, SubtitleStyle } from '../lib/types';
 import { Avatar, Badge, Button, Card, Chip, Input, Row, Segmented, Select, Slider, Spinner, Switch, TextArea } from '../components/ui';
@@ -459,6 +459,7 @@ function AppearanceSection({ p, set }: { p: Preferences; set: (x: object) => voi
           <Switch checked={p.ui.hideScores} onChange={(v) => set({ ui: { hideScores: v } })} />
         </Row>
       </Group>
+      <HdrGroup />
       <Group title="Custom CSS" hint="Your own styles on top of Nova's, for this profile only. Clear it to undo.">
         <div className="py-3">
           <TextArea
@@ -486,6 +487,37 @@ function AppearanceSection({ p, set }: { p: Preferences; set: (x: object) => voi
         </Row>
       </Group>
     </>
+  );
+}
+
+/** Windows app: whether Windows Auto HDR may brighten the interface (it applies when Nova starts). */
+function HdrGroup() {
+  const [info, setInfo] = useDesktopInfo();
+  if (!info || !desktop || info.platform !== 'win32') return null;
+  const on = Boolean(info.settings.hdrInterface);
+  const pending = info.hdrAtLaunch !== undefined && info.hdrAtLaunch !== on;
+  return (
+    <Group title="HDR" hint="HDR videos, and SDR videos that RTX Video HDR turns into HDR, always play in HDR on an HDR screen.">
+      <Row
+        label="HDR interface"
+        hint="Lets Windows Auto HDR brighten Nova's own screens too. Windows switches it on and off as videos start and stop, so with it off the interface always looks the same."
+      >
+        <Switch
+          checked={on}
+          onChange={async (v) => {
+            const settings = await desktop!.setSettings({ hdrInterface: v });
+            setInfo((i) => (i ? { ...i, settings } : i));
+          }}
+        />
+      </Row>
+      {pending && (
+        <Row label="Restart Nova to apply this">
+          <Button size="sm" variant="white" onClick={() => void desktop!.relaunch?.()}>
+            Restart now
+          </Button>
+        </Row>
+      )}
+    </Group>
   );
 }
 
@@ -917,44 +949,7 @@ function AboutSection({ p, set }: { p?: Preferences; set: (x: object) => void })
           </Row>
         </Group>
       )}
-      {info && <PortRow info={info} save={(port) => setDesktop({ port })} />}
     </>
-  );
-}
-
-/** Desktop: which port Nova's own server uses on this computer. */
-function PortRow({ info, save }: { info: DesktopInfo; save: (port: number | null) => Promise<void> }) {
-  const [value, setValue] = useState(String(info.settings.port ?? ''));
-  const wanted = value.trim() ? Number(value) : null;
-  const valid = wanted === null || (Number.isInteger(wanted) && wanted >= 1024 && wanted <= 65535);
-  const changed = wanted !== (info.settings.port ?? null);
-  return (
-    <Group title="Server" hint="Nova runs a small server on this computer that this window talks to.">
-      <Row
-        label="Port"
-        hint={
-          <>
-            Right now <code className="rounded bg-white/8 px-1">http://127.0.0.1:{info.port}</code>. Leave it empty for the usual 11471: Nova websites that stream through this app look for it there.
-          </>
-        }
-      >
-        <div className="flex items-center gap-2">
-          <Input value={value} onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ''))} placeholder="11471" inputMode="numeric" className="w-24 text-center" aria-label="Port" />
-          <Button
-            size="sm"
-            variant="white"
-            disabled={!valid || !changed}
-            onClick={async () => {
-              await save(wanted);
-              await desktop?.relaunch?.();
-            }}
-          >
-            Save & restart
-          </Button>
-        </div>
-      </Row>
-      {!valid && <p className="pb-3 text-xs text-bad">Use a number from 1024 to 65535.</p>}
-    </Group>
   );
 }
 

@@ -9,8 +9,8 @@ import { HttpError } from './http.js';
 
 const ENDPOINT = 'https://graphql.anilist.co';
 const WINDOW_MS = 60_000;
-const MAX_WAIT_MS = 75_000;
 const CONCURRENCY = 4;
+const BUSY = 'AniList is busy right now (its rate limit was reached)';
 
 let limit = 30;
 let blockedUntil = 0;
@@ -32,7 +32,7 @@ async function slot(deadline: number): Promise<void> {
     if (wait <= 0) break;
     if (now + wait > deadline) {
       release();
-      throw new HttpError(503, 'AniList is busy right now; try again in a minute');
+      throw new HttpError(503, BUSY, { retryAfter: wait / 1000 });
     }
     await sleep(Math.min(wait, 5_000));
   }
@@ -61,10 +61,12 @@ function learn(res: Response): void {
 interface Options {
   token?: string;
   timeoutMs?: number;
+  /** How long a call may queue for the rate limit before giving up with a 503 (background work waits longer). */
+  maxWaitMs?: number;
 }
 
 async function send<T>(body: string, opts: Options): Promise<T> {
-  const deadline = Date.now() + MAX_WAIT_MS;
+  const deadline = Date.now() + (opts.maxWaitMs ?? 15_000);
   for (let attempt = 0; ; attempt++) {
     await slot(deadline);
     let res: Response;
@@ -93,7 +95,7 @@ async function send<T>(body: string, opts: Options): Promise<T> {
     if (res.status === 401 && opts.token) throw new HttpError(401, 'AniList rejected the sign-in; connect the account again in Settings → Tracking');
     const json = (await res.json().catch(() => null)) as { data?: T; errors?: { message: string; status?: number }[] } | null;
     if (res.status === 404 || json?.errors?.some((e) => e.status === 404)) throw new HttpError(404, 'Not found on AniList');
-    if (res.status === 429) throw new HttpError(503, 'AniList is busy right now; try again in a minute');
+    if (res.status === 429) throw new HttpError(503, BUSY, { retryAfter: Math.max(5, (blockedUntil - Date.now()) / 1000) });
     if (!res.ok || !json?.data) throw new HttpError(502, json?.errors?.[0]?.message ? `AniList: ${json.errors[0].message}` : `AniList answered ${res.status}`);
     return json.data;
   }

@@ -1,7 +1,7 @@
 {
   "name": "nova-android",
   "private": true,
-  "version": "2.5.0",
+  "version": "2.6.0",
   "description": "Nova for Android: the Nova web app in a native shell that connects to your Nova server.",
   "scripts": {
     "sync": "cap sync android"

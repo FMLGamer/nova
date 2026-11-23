@@ -1,6 +1,25 @@
 import { HttpError } from './http.js';
 
-/** Fetch JSON from an upstream API with a timeout, mapping failures to 502. */
+const SERVICES: Record<string, string> = {
+  'api.themoviedb.org': 'TMDB',
+  'v3-cinemeta.strem.io': 'Cinemeta',
+  'api.ani.zip': 'ani.zip',
+  'openlibrary.org': 'Open Library',
+  'gutendex.com': 'Project Gutenberg',
+  'api.jikan.moe': 'Jikan',
+};
+
+/** A readable name for the service behind a URL, for error messages. */
+export function serviceName(url: string): string {
+  try {
+    const host = new URL(url).hostname;
+    return SERVICES[host] ?? host;
+  } catch {
+    return 'An outside service';
+  }
+}
+
+/** Fetch JSON from an upstream API with a timeout, mapping failures to 502 (503 with Retry-After when rate limited). */
 export async function fetchJson<T>(
   url: string,
   init: (RequestInit & { timeoutMs?: number }) = {},
@@ -10,10 +29,14 @@ export async function fetchJson<T>(
   try {
     res = await fetch(url, { ...rest, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
-    throw new HttpError(502, 'Upstream request failed');
+    throw new HttpError(502, `${serviceName(url)} could not be reached`);
+  }
+  if (res.status === 429) {
+    const after = Number(res.headers.get('retry-after'));
+    throw new HttpError(503, `${serviceName(url)} is busy right now (its rate limit was reached)`, { retryAfter: after > 0 ? after : 30 });
   }
   if (!res.ok) {
-    throw new HttpError(res.status === 404 ? 404 : 502, `Upstream responded ${res.status}`);
+    throw new HttpError(res.status === 404 ? 404 : 502, `${serviceName(url)} answered ${res.status}`);
   }
   return (await res.json()) as T;
 }

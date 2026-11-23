@@ -45,7 +45,11 @@ The Windows installer and the AppImage download new versions in the background a
 The app also works as a local streaming engine for `nova:client` servers. When such a site wants to play a torrent, Nova asks
 you once whether to allow it. Allowed sites are listed under **Settings → Account & sharing**.
 
-Nova's server inside the app listens on `127.0.0.1:11471`; pick another port under **Settings → About Nova → Server**.
+Nova's server inside the app listens on `127.0.0.1:11471`; pick another port under **Server → Overview**.
+
+On Windows with Auto HDR, the app keeps its interface in standard range (Windows otherwise switches it between SDR and
+HDR as videos start and stop); HDR videos and RTX Video HDR still play in HDR. **Settings → Appearance → HDR** lets
+Auto HDR brighten the interface instead.
 
 ### Nova for Android
 

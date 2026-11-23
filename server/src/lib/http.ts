@@ -11,10 +11,13 @@ export function publicUrl(req?: Request): string {
 
 export class HttpError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Seconds after which trying again makes sense (rate limits). */
+  retryAfter?: number;
+  constructor(status: number, message: string, opts: { retryAfter?: number } = {}) {
     super(message);
     this.status = status;
     this.name = 'HttpError';
+    if (opts.retryAfter) this.retryAfter = Math.ceil(opts.retryAfter);
   }
 }
 

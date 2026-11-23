@@ -20,6 +20,7 @@ import {
   Plus,
   Radio,
   RefreshCw,
+  RotateCcw,
   ScrollText,
   Search,
   Shield,
@@ -28,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { desktop, useDesktopInfo } from '../lib/desktop';
 import { cls, fmtBytes, relTime } from '../lib/format';
 import { useAppConfig, useSession } from '../lib/queries';
 import { errorText, toast } from '../lib/store';
@@ -99,10 +101,58 @@ function Overview() {
           <Row label="Live channels">{s.liveChannels}</Row>
           <Row label="Last backup">{s.backups[0] ? relTime(s.backups[0].createdAt) : 'None yet'}</Row>
           <Row label="Transcode slots">{data.limits.maxTranscodes}</Row>
+          <PortRow port={s.port} fromEnv={s.portFromEnv} />
         </div>
       </Card>
       <Integrations />
     </div>
+  );
+}
+
+/** The port the server listens on: editable in the desktop app (it restarts), fixed by PORT on a server. */
+function PortRow({ port, fromEnv }: { port: number; fromEnv: boolean }) {
+  const [info, setInfo] = useDesktopInfo();
+  const [value, setValue] = useState<string | null>(null);
+  if (!info || !desktop) {
+    return (
+      <Row label="Port" hint={fromEnv ? 'Set by the PORT environment variable; publish it under the same or another port in your container settings.' : 'Change it with the PORT environment variable.'}>
+        <code className="rounded bg-white/8 px-1.5 py-0.5 text-sm">{port}</code>
+      </Row>
+    );
+  }
+  const shown = value ?? String(info.settings.port ?? '');
+  const wanted = shown.trim() ? Number(shown) : null;
+  const valid = wanted === null || (Number.isInteger(wanted) && wanted >= 1024 && wanted <= 65535);
+  const changed = wanted !== (info.settings.port ?? null);
+  return (
+    <Row
+      label="Port"
+      hint={
+        valid ? (
+          <>
+            Right now <code className="rounded bg-white/8 px-1">http://127.0.0.1:{info.port}</code>. Leave it empty for the usual 11471: Nova websites that stream through this app look for it there.
+          </>
+        ) : (
+          <span className="text-bad">Use a number from 1024 to 65535.</span>
+        )
+      }
+    >
+      <div className="flex items-center gap-2">
+        <Input value={shown} onChange={(e) => setValue(e.target.value.replace(/[^0-9]/g, ''))} placeholder="11471" inputMode="numeric" className="w-24 text-center" aria-label="Port" />
+        <Button
+          size="sm"
+          variant="white"
+          disabled={!valid || !changed}
+          onClick={async () => {
+            const settings = await desktop!.setSettings({ port: wanted });
+            setInfo((i) => (i ? { ...i, settings } : i));
+            await desktop!.relaunch?.();
+          }}
+        >
+          Save & restart
+        </Button>
+      </div>
+    </Row>
   );
 }
 
@@ -147,7 +197,8 @@ function Integrations() {
   const { data } = useQuery({ queryKey: ['admin-integrations'], queryFn: api.admin.integrations });
   const [draft, setDraft] = useState<Record<string, string>>({});
   if (!data) return null;
-  const dirty = Object.keys(draft).length > 0;
+  const typed = Object.fromEntries(Object.entries(draft).filter(([, v]) => v.trim()));
+  const dirty = Object.keys(typed).length > 0;
   return (
     <Card>
       <h3 className="font-display text-lg font-semibold">Integrations</h3>
@@ -160,14 +211,29 @@ function Integrations() {
               {st?.fromEnv ? (
                 <Badge tone="ok">Set by environment</Badge>
               ) : (
-                <Input
-                  type={f.secret ? 'password' : 'text'}
-                  autoComplete="off"
-                  placeholder={st?.set ? '•••••••• (saved)' : 'Not set'}
-                  value={draft[f.key] ?? ''}
-                  onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
-                  className="w-64"
-                />
+                <div className="flex items-center gap-2">
+                  <Input
+                    type={f.secret ? 'password' : 'text'}
+                    autoComplete="off"
+                    placeholder={st?.set ? '•••••••• (saved)' : 'Not set'}
+                    value={draft[f.key] ?? ''}
+                    onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                    className="w-64"
+                  />
+                  {st?.set && (
+                    <button
+                      onClick={() =>
+                        confirm(`Remove the ${f.label}? Nova goes back to working without it.`) &&
+                        act(() => api.admin.saveIntegrations({ [f.key]: '' }), 'Removed', [['admin-integrations'], ['home']])
+                      }
+                      aria-label={`Remove the ${f.label}`}
+                      title="Remove (back to the default)"
+                      className="grid size-9 shrink-0 place-items-center rounded-full text-muted hover:bg-white/8 hover:text-bad"
+                    >
+                      <Trash2 className="size-4" />
+                    </button>
+                  )}
+                </div>
               )}
             </Row>
           );
@@ -185,7 +251,7 @@ function Integrations() {
           onClick={() =>
             act(
               async () => {
-                await api.admin.saveIntegrations(draft);
+                await api.admin.saveIntegrations(typed);
                 setDraft({});
               },
               'Saved',
@@ -348,14 +414,28 @@ function Permissions({ p }: { p: PermissionSummary }) {
 }
 
 function ConfigForm({ fields, values, onChange }: { fields: (ConfigField & { managed?: boolean })[]; values: Record<string, unknown>; onChange: (k: string, v: unknown) => void }) {
+  const isSet = (f: ConfigField) => values[f.key] != null && values[f.key] !== '' && values[f.key] !== f.default;
   return (
     <div className="space-y-3">
       {fields.map((f) => (
         <label key={f.key} className="block">
-          <span className="text-sm font-medium">
+          <span className="flex items-center text-sm font-medium">
             {f.title}
             {f.required && <span className="text-bad"> *</span>}
             {f.managed && <Badge className="ml-2">Set by server env</Badge>}
+            {!f.managed && f.type !== 'checkbox' && isSet(f) && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  onChange(f.key, null);
+                }}
+                className="ml-auto flex items-center gap-1 text-xs font-normal text-faint hover:text-fg"
+                title={f.default != null && f.default !== '' ? `Back to ${String(f.default)}` : 'Clear'}
+              >
+                <RotateCcw className="size-3" /> {f.default != null && f.default !== '' ? 'Default' : 'Clear'}
+              </button>
+            )}
           </span>
           {f.description && <span className="block text-xs text-faint">{f.description}</span>}
           <div className="mt-1.5">

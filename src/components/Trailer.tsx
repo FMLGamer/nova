@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Pause, Play, Volume2, VolumeX } from 'lucide-react';
 
 const MUTE_KEY = 'nova.trailerMuted';
+const START_OVERLAY_S = 3.5;
 
 /**
  * A background YouTube trailer with all YouTube UI hidden. Fades in only once it is
@@ -12,15 +13,23 @@ const MUTE_KEY = 'nova.trailerMuted';
 export function Trailer({ videoKey, onFail, controls = true, className }: { videoKey: string; onFail?: () => void; controls?: boolean; className?: string }) {
   const ref = useRef<HTMLIFrameElement>(null);
   const [visible, setVisible] = useState(false);
+  const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(() => localStorage.getItem(MUTE_KEY) !== 'false');
   const mutedRef = useRef(muted);
   mutedRef.current = muted;
+  // YouTube shows its own title bar and play overlay for the first seconds of playback (again after each loop
+  // and resume), so the video is only revealed once its own clock has passed this point.
+  const revealAt = useRef(START_OVERLAY_S);
+  const lastTime = useRef(0);
 
   const cmd = (func: string, args: unknown[] = []) => ref.current?.contentWindow?.postMessage(JSON.stringify({ event: 'command', func, args }), '*');
 
   useEffect(() => {
     let started = false;
+    let playing = false;
+    revealAt.current = START_OVERLAY_S;
+    lastTime.current = 0;
     const onMsg = (e: MessageEvent) => {
       if (e.source !== ref.current?.contentWindow || typeof e.data !== 'string') return;
       let data: { event?: string; info?: unknown };
@@ -31,17 +40,25 @@ export function Trailer({ videoKey, onFail, controls = true, className }: { vide
       }
       if (data.event === 'onError') onFail?.();
       const state = data.event === 'onStateChange' ? data.info : data.event === 'infoDelivery' ? (data.info as { playerState?: number } | null)?.playerState : undefined;
-      if (state === 1) {
-        if (!started && !mutedRef.current) cmd('unMute');
-        // YouTube flashes its own play/skip overlay for a moment after starting; reveal only once it has faded.
-        if (!started) window.setTimeout(() => setVisible(true), 2600);
-        else setVisible(true);
+      if (state === 1 && !started) {
         started = true;
+        if (!mutedRef.current) cmd('unMute');
       }
-      // Hide again on the end card / buffering at the loop seam.
-      if (state === 0) setVisible(false);
+      if (typeof state === 'number') {
+        playing = state === 1;
+        // Ended, paused or buffering: YouTube draws over the picture.
+        if (!playing) setVisible(false);
+      }
       const info = data.info as { currentTime?: number; duration?: number } | null;
-      if (data.event === 'infoDelivery' && info?.duration && info.currentTime && info.duration - info.currentTime < 1.2) setVisible(false);
+      if (data.event === 'infoDelivery' && typeof info?.currentTime === 'number') {
+        const t = info.currentTime;
+        if (t + 0.5 < lastTime.current) revealAt.current = t + START_OVERLAY_S;
+        lastTime.current = t;
+        const nearEnd = Boolean(info.duration && info.duration - t < 1.2);
+        const show = playing && t >= revealAt.current && !nearEnd;
+        setVisible(show);
+        if (show) setReady(true);
+      }
     };
     window.addEventListener('message', onMsg);
     const t = window.setTimeout(() => !started && onFail?.(), 9000);
@@ -88,10 +105,11 @@ export function Trailer({ videoKey, onFail, controls = true, className }: { vide
       </div>
       {controls && (
         <AnimatePresence>
-          {visible && (
+          {ready && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute right-5 bottom-[22%] z-20 flex gap-2 sm:right-10">
               <button
                 onClick={() => {
+                  if (paused) revealAt.current = lastTime.current + 1.5;
                   cmd(paused ? 'playVideo' : 'pauseVideo');
                   setPaused((p) => !p);
                 }}

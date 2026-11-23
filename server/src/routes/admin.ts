@@ -44,6 +44,8 @@ adminRouter.get(
         torrentMode: config.torrentMode,
         sandbox: sandboxAvailable,
         hwAccel: config.hwAccel || null,
+        port: config.port,
+        portFromEnv: Boolean(process.env.PORT),
         library: { enabled: libraryEnabled(), storage: storageStats(), lastScan },
         plugins: { total: plugins.length, pending: plugins.filter((p) => p.status === 'pending' || p.pendingUpdate).length },
         approvals: count("SELECT COUNT(*) AS n FROM downloads WHERE status = 'pending'"),

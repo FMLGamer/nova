@@ -558,6 +558,19 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    // Answers from AniList, TMDB and co. that survive a restart, so a fresh start doesn't hit their rate limits.
+    version: 12,
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE upstream_cache (
+          key        TEXT PRIMARY KEY,
+          value      TEXT NOT NULL,
+          expires_at INTEGER NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 function migrate(): void {

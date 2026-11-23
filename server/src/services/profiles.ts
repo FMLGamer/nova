@@ -36,6 +36,9 @@ export const DEFAULT_PREFERENCES = {
     addAllToCalendar: false, // false = only "My List" anime appear on the calendar
     preferredGroups: [] as string[],
     calendarFilter: 'all' as 'all' | 'mylist' | 'watching',
+    // The Anime tab's schedule opens the way it was last left.
+    scheduleView: 'columns' as 'columns' | 'timeline',
+    scheduleRange: 'week' as 'week' | 'month',
     // Show every title airing that day as a list beside the carousel.
     scheduleAllTitles: false,
     // Connected AniList / MyAnimeList: put a show on "Watching" as soon as you start it.

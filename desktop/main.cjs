@@ -3,7 +3,7 @@
 // and shows it in a window. The same server doubles as a local streaming engine
 // for Nova websites whose servers leave torrents to their viewers.
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, screen, session, shell } = require('electron');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
 const net = require('node:net');
@@ -46,8 +46,36 @@ function writeJson(file, value) {
 // ---------------------------------------------------------------- app settings
 
 const settingsFile = path.join(dataRoot, 'desktop-settings.json');
-const DEFAULT_SETTINGS = { autoUpdate: true, discord: false, port: null };
+const DEFAULT_SETTINGS = { autoUpdate: true, discord: false, port: null, hdrInterface: false };
 let settings = readJson(settingsFile, DEFAULT_SETTINGS);
+
+/**
+ * Windows Auto HDR treats Nova like a game and switches its whole window between SDR and HDR whenever a video
+ * starts, pauses or scrolls away. Unless asked otherwise, tell Windows (per app, like Settings → Display → Graphics
+ * does) to leave Nova alone; HDR videos and RTX Video HDR still play in HDR. Runs before the GPU process starts.
+ */
+function applyAutoHdrPreference() {
+  if (process.platform !== 'win32') return;
+  const key = 'HKCU\\Software\\Microsoft\\DirectX\\UserGpuPreferences';
+  const name = process.execPath;
+  const reg = (args) => execFileSync('reg', args, { windowsHide: true, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  try {
+    let current = '';
+    try {
+      current = reg(['query', key, '/v', name]).match(/REG_SZ\s+(.*)$/m)?.[1]?.trim() ?? '';
+    } catch {
+      /* no entry yet */
+    }
+    const parts = current.split(';').filter((p) => p && !p.startsWith('AutoHDREnable='));
+    parts.push(`AutoHDREnable=${settings.hdrInterface ? 1 : 0}`);
+    const wanted = `${parts.join(';')};`;
+    if (wanted !== current) reg(['add', key, '/v', name, '/t', 'REG_SZ', '/d', wanted, '/f']);
+  } catch (err) {
+    console.error('[nova] could not set the Auto HDR preference:', err?.message ?? err);
+  }
+}
+applyAutoHdrPreference();
+const hdrAtLaunch = Boolean(settings.hdrInterface);
 
 function buildInfo() {
   return readJson(path.join(resources, 'build-info.json'), { discordClientId: '' });
@@ -394,13 +422,18 @@ function queueActivity(a) {
 
 ipcMain.handle('nova:info', (e) => {
   if (!trusted(e)) return null;
-  return { version: app.getVersion(), platform: process.platform, settings, port, update: updateState, discordAvailable: Boolean(process.env.NOVA_DISCORD_CLIENT_ID || buildInfo().discordClientId) };
+  return { version: app.getVersion(), platform: process.platform, settings, port, update: updateState, discordAvailable: Boolean(process.env.NOVA_DISCORD_CLIENT_ID || buildInfo().discordClientId), hdrAtLaunch };
 });
 ipcMain.handle('nova:settings', (e, patch) => {
   if (!trusted(e) || !patch || typeof patch !== 'object') return settings;
   if (typeof patch.autoUpdate === 'boolean') settings.autoUpdate = patch.autoUpdate;
   if (typeof patch.discord === 'boolean') settings.discord = patch.discord;
   if (patch.port === null || (Number.isInteger(patch.port) && patch.port >= 1024 && patch.port <= 65535)) settings.port = patch.port;
+  if (typeof patch.hdrInterface === 'boolean' && patch.hdrInterface !== settings.hdrInterface) {
+    settings.hdrInterface = patch.hdrInterface;
+    // Windows reads it when Nova starts.
+    applyAutoHdrPreference();
+  }
   writeJson(settingsFile, settings);
   if (!settings.discord) discord();
   if (settings.autoUpdate) checkForUpdates();

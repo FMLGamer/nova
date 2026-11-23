@@ -54,8 +54,15 @@ Nova is a self-hosted media app with four parts:
 - **Recommendations** (`services/recommend.ts`): genre/seed scoring over watch history and the tracker lists (anything
   on them but "planning" is left out); dismissals in `rec_dismissed`. Stats: `services/stats.ts`.
 - **AniList** is always called through `lib/anilist.ts` (`anilistQuery`): a queue under the reported rate limit, 429s
-  wait for `Retry-After`, identical requests in flight are shared. `lib/cache.ts` `cached()` also shares concurrent
-  misses. Don't call graphql.anilist.co directly.
+  wait for `Retry-After`, identical requests in flight are shared; a call that would queue longer than `maxWaitMs`
+  (15 s) fails with a 503 carrying `retryAfter`. Aliased fields cost one request each, so batching doesn't save budget.
+  Don't call graphql.anilist.co directly.
+- **Caching** (`lib/cache.ts` `cached()`): shares concurrent misses. Keys with an upstream prefix (`anilist:`, `tmdb:`,
+  `cinemeta:`, `anizip:`, `read:ani`, `read:ol`, `arm:`, `kitsu:`, `lists:`) are also kept in SQLite (`upstream_cache`,
+  migration v12): after a restart they answer straight away, and an expired one is served while a refresh runs if the
+  refresh takes longer than 2.5 s. Values must be JSON. `warmCatalog` refreshes the Anime tab's data every 20 minutes.
+- **Errors**: `HttpError(status, message, { retryAfter })` becomes `{ error, retryAfter }` plus a `Retry-After` header.
+  The client retries 502-504 itself after that delay and shows a toast saying which service and when (`src/lib/upstream.ts`).
 - **History import** (`services/historyImport.ts`, `POST /api/me/import`): Netflix / Letterboxd / generic CSV, parsed,
   matched (TMDB search, AniList for anime; episodes by name), written as finished `watch_progress` rows dated when they
   were watched (`ON CONFLICT DO NOTHING`). Runs as an in-memory background job the client polls.
@@ -81,7 +88,10 @@ Nova is a self-hosted media app with four parts:
   web UI pads its top bar with `wco-pad` and marks drag areas with `app-drag`), `preload.cjs` exposing
   `window.novaDesktop` (only to Nova's own origin), electron-updater for the NSIS installer and AppImage, and Discord
   status (`discord.cjs`, app ID from `build-info.json` written at stage time from `DISCORD_CLIENT_ID`). The server's port
-  comes from `desktop-settings.json` (`port`, default 11471).
+  comes from `desktop-settings.json` (`port`, default 11471; set under Server → Overview). On Windows it writes
+  `AutoHDREnable=0|1` for its own exe into `HKCU\Software\Microsoft\DirectX\UserGpuPreferences` at startup (setting
+  `hdrInterface`, default off) so Auto HDR doesn't flip the interface between SDR and HDR. On HDR screens the player
+  drops `backdrop-filter` (`.hdr-ui`), which would pull the video off its HDR overlay plane.
 - **Android shell** (`mobile/`): `www/` is a small local connect page (remembers the server in localStorage, checks
   `/healthz` through CapacitorHttp) that then navigates the WebView to the server. The web app recognises the shell by
   `NovaAndroid` in the user agent (`src/lib/mobile.ts`). `android/` is the committed native project; `cap sync` copies

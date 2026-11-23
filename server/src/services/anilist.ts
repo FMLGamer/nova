@@ -363,52 +363,37 @@ export async function anilistAiring(ids: string[], fromSec: number, toSec: numbe
 
 const RECENT_PAGE = 24;
 
-/** Titles with an episode out in the past week, newest first; `page` (1-based) of RECENT_PAGE. */
+/** One at a time and only what has expired, so a refresh never competes with someone browsing. */
+export async function warmCatalog(): Promise<void> {
+  for (const job of [anilistRows.trending, anilistRows.seasonal, () => anilistSchedule(0), () => anilistSchedule(-1)]) await job().catch(() => undefined);
+}
+
+/** Titles with an episode out in the past week, newest first; `page` (1-based) of RECENT_PAGE. Built from the schedules. */
 export async function anilistRecent(page = 1): Promise<CatalogItem[]> {
-  const all = await cached('anilist:recent-week', 30 * 60 * 1000, async () => {
-    const now = Math.floor(Date.now() / 1000);
-    const start = now - 7 * 24 * 60 * 60;
-    const gql = `
-      query ($start: Int, $end: Int, $page: Int) {
-        Page(page: $page, perPage: 50) {
-          pageInfo { hasNextPage }
-          airingSchedules(airingAt_greater: $start, airingAt_lesser: $end, sort: TIME_DESC) {
-            media {
-              ${MEDIA_FIELDS}
-              isAdult
-            }
-          }
-        }
-      }`;
-    const seen = new Set<number>();
-    const out: CatalogItem[] = [];
-    for (let p = 1; p <= 8; p++) {
-      const data = await anilist<{
-        Page: { pageInfo: { hasNextPage: boolean }; airingSchedules: { media: AniMedia & { isAdult?: boolean } }[] };
-      }>(gql, { start, end: now, page: p });
-      for (const s of data.Page.airingSchedules) {
-        if (s.media.isAdult || !s.media.coverImage?.large || seen.has(s.media.id)) continue;
-        seen.add(s.media.id);
-        out.push(mapAni(s.media));
-      }
-      if (!data.Page.pageInfo.hasNextPage) break;
-    }
-    return out;
-  });
+  const [last, current] = await Promise.all([anilistSchedule(-1), anilistSchedule(0)]);
+  const now = Math.floor(Date.now() / 1000);
+  const seen = new Set<string>();
+  const all: CatalogItem[] = [];
+  for (const e of [...last, ...current].filter((x) => x.airingAt <= now && x.airingAt > now - 7 * 86_400).sort((a, b) => b.airingAt - a.airingAt)) {
+    if (seen.has(e.item.id)) continue;
+    seen.add(e.item.id);
+    all.push(e.item);
+  }
   const from = (Math.max(1, Math.trunc(page)) - 1) * RECENT_PAGE;
   return all.slice(from, from + RECENT_PAGE);
 }
 
 export async function anilistSchedule(weekOffset = 0): Promise<AiringEntry[]> {
   const offset = Math.max(-8, Math.min(8, Math.trunc(weekOffset)));
-  return cached(`anilist:schedule:${offset}`, 60 * 60 * 1000, async () => {
-    // Monday 00:00 UTC of the requested week .. the following Monday.
-    const now = new Date();
-    const day = (now.getUTCDay() + 6) % 7; // 0=Mon
-    const monday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - day + offset * 7);
-    const start = Math.floor(monday / 1000);
-    const end = start + 7 * 24 * 60 * 60;
-
+  // Monday 00:00 UTC of the requested week .. the following Monday.
+  const now = new Date();
+  const day = (now.getUTCDay() + 6) % 7; // 0=Mon
+  const monday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - day + offset * 7);
+  const start = Math.floor(monday / 1000);
+  const end = start + 7 * 24 * 60 * 60;
+  // A week that is over doesn't change any more; this week's times still move now and then.
+  const ttl = end * 1000 < Date.now() ? 7 * DAY : offset === 0 ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
+  return cached(`anilist:schedule:${new Date(monday).toISOString().slice(0, 10)}`, ttl, async () => {
     const gql = `
       query ($start: Int, $end: Int, $page: Int) {
         Page(page: $page, perPage: 50) {
@@ -426,7 +411,7 @@ export async function anilistSchedule(weekOffset = 0): Promise<AiringEntry[]> {
       }`;
 
     const entries: AiringEntry[] = [];
-    for (let p = 1; p <= 4; p++) {
+    for (let p = 1; p <= 8; p++) {
       const data = await anilist<{
         Page: {
           pageInfo: { hasNextPage: boolean };

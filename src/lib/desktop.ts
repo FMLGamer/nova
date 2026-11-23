@@ -15,6 +15,8 @@ export interface DesktopSettings {
   discord: boolean;
   /** null: Nova's usual port (11471). */
   port: number | null;
+  /** Windows: let Auto HDR brighten the interface (off keeps it standard range). */
+  hdrInterface: boolean;
 }
 
 export interface DesktopInfo {
@@ -25,6 +27,8 @@ export interface DesktopInfo {
   port: number;
   update: DesktopUpdate;
   discordAvailable: boolean;
+  /** The HDR interface setting this run started with (Windows applies it at launch). */
+  hdrAtLaunch?: boolean;
 }
 
 export interface Activity {

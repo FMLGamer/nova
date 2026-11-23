@@ -12,6 +12,8 @@ import { profilesRouter } from './routes/profiles.js';
 import { invitesRouter } from './routes/invites.js';
 import { adminRouter } from './routes/admin.js';
 import { catalogRouter } from './routes/catalog.js';
+import { warmCatalog } from './services/anilist.js';
+import { pruneCache } from './lib/cache.js';
 import { libraryRouter } from './routes/library-media.js';
 import { playRouter } from './routes/play.js';
 import { streamRouter } from './routes/stream.js';
@@ -173,7 +175,8 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
   if (err instanceof HttpError) {
-    res.status(err.status).json({ error: err.message });
+    if (err.retryAfter) res.setHeader('Retry-After', String(err.retryAfter));
+    res.status(err.status).json({ error: err.message, ...(err.retryAfter ? { retryAfter: err.retryAfter } : {}) });
     return;
   }
   if (err instanceof SyntaxError && 'body' in err) {
@@ -205,4 +208,7 @@ every('library-scan', config.library.scanIntervalMinutes * 60_000, scanLibrary, 
 watchLibrary();
 every('live-refresh', 6 * 3600_000, refreshAllLive, { initialDelayMs: 3 * 60_000 });
 every('epg-refresh', 12 * 3600_000, refreshAllEpg, { initialDelayMs: 4 * 60_000 });
+// The Anime tab and Home read these on every visit: refresh them before anyone waits for them.
+every('catalog-warm', 20 * 60_000, warmCatalog, { initialDelayMs: 20_000 });
+every('cache-prune', 24 * 3600_000, async () => pruneCache(), { initialDelayMs: 5 * 60_000 });
 scheduleBackups();

@@ -13,13 +13,15 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Seconds the server suggests waiting before trying again (rate limits). */
+    public retryAfter?: number,
   ) {
     super(message);
   }
 }
 
-/** react-query `retry` for calls that go out to a rate-limited service: try again when it was busy or down, not on 4xx. */
-export const retryUpstream = (count: number, e: unknown) => count < 3 && (!(e instanceof ApiError) || e.status >= 500);
+/** A metadata service behind the server (AniList, TMDB...) was busy, unreachable or broken. */
+export const isUpstreamError = (e: unknown): e is ApiError => e instanceof ApiError && e.status >= 502 && e.status <= 504;
 
 type Query = Record<string, string | number | boolean | null | undefined>;
 
@@ -52,8 +54,10 @@ export async function req<R>(method: string, path: string, body?: unknown, query
     data = text;
   }
   if (!res.ok) {
-    const fromBody = data && typeof data === 'object' && 'error' in data ? String((data as { error: unknown }).error) : '';
-    throw new ApiError(res.status, fromBody || res.statusText || 'Request failed');
+    const body = data && typeof data === 'object' ? (data as { error?: unknown; retryAfter?: unknown }) : null;
+    const fromBody = body && 'error' in body ? String(body.error) : '';
+    const retryAfter = Number(body?.retryAfter ?? res.headers.get('retry-after')) || undefined;
+    throw new ApiError(res.status, fromBody || res.statusText || 'Request failed', retryAfter);
   }
   return data as R;
 }
