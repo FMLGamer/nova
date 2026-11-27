@@ -10,7 +10,10 @@ import {
   ExternalLink,
   FolderPlus,
   HardDrive,
+  HardDriveDownload,
+  Layers,
   ListChecks,
+  ListPlus,
   Lock,
   MessagesSquare,
   MoreHorizontal,
@@ -18,13 +21,15 @@ import {
   Plus,
   Radio,
   Share2,
-  Smartphone,
   Sparkles,
   Star,
+  Trash2,
   Users,
+  X,
   Zap,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { downloadEpisodes, enableDeviceRule, missingOnDevice, useDeviceRules } from '../lib/autoDownload';
 import { cls, episodeLabel, fmtAirTime, fmtRuntime, itemKeyFor, kindLabel, relTime, watchPath } from '../lib/format';
 import { playIntent } from '../lib/intent';
 import { offlineSupported, useOffline } from '../lib/offline';
@@ -250,14 +255,20 @@ function ShareModal({ detail, onClose }: { detail: CatalogDetail; onClose: () =>
   );
 }
 
-function DownloadMenu({ detail, intentSeason, intentEpisode }: { detail: CatalogDetail; intentSeason: number | null; intentEpisode: number | null }) {
+function DownloadMenu({ detail, intentSeason, intentEpisode, season }: { detail: CatalogDetail; intentSeason: number | null; intentEpisode: number | null; season: number }) {
   const { data: session } = useSession();
   const offline = useOffline();
   const qc = useQueryClient();
+  const deviceRule = useDeviceRules((s) => s.rules.find((r) => r.mediaId === detail.id));
   const isSeries = detail.mediaType !== 'movie';
   const itemKey = itemKeyFor(detail.id, intentSeason, intentEpisode);
   const job = offline.jobs[itemKey];
-  const serverDownloads = session?.settings.downloadsEnabled;
+  const saved = offline.entries.some((e) => e.itemKey === itemKey);
+  const working = Object.values(offline.jobs).filter((j) => j.itemKey.startsWith(`${detail.id}:`) || j.itemKey === detail.id);
+  const onDevice = offlineSupported();
+  // Downloading to the server is opt-in per server (Server → Advanced) on top of the account being allowed to.
+  const toServerToo = Boolean(session?.settings.downloadsEnabled && session.server?.serverDownloads);
+  if (!onDevice && !toServerToo) return null;
 
   const toServer = async () => {
     try {
@@ -274,11 +285,22 @@ function DownloadMenu({ detail, intentSeason, intentEpisode }: { detail: Catalog
   const rule = async (mode: 'new' | 'missing') => {
     try {
       const r = await api.server.saveRule({ mediaId: detail.id, title: detail.title, poster: detail.poster, mode, runNow: true });
-      toast(r.queued ? `Auto-download on — ${r.queued} episode${r.queued > 1 ? 's' : ''} queued` : 'Auto-download on for new episodes', 'ok');
+      toast(r.queued ? `${r.queued} episode${r.queued > 1 ? 's' : ''} queued on the server` : mode === 'new' ? 'The server downloads new episodes from now on' : 'Nothing missing right now', 'ok');
     } catch (e) {
       toast(errorText(e), 'bad');
     }
   };
+  const many = async (what: 'season' | 'missing') => {
+    try {
+      const eps = what === 'season' ? (await qc.fetchQuery({ queryKey: ['episodes', detail.id, season], queryFn: () => api.catalog.episodes(detail.id, season), staleTime: 30 * 60_000 })).filter((e) => !e.airDate || Date.parse(e.airDate) <= Date.now()) : await missingOnDevice(detail);
+      if (eps.length > 30 && !confirm(`Download ${eps.length} episodes to this device? They take up space until you remove them.`)) return;
+      const n = downloadEpisodes(detail, eps);
+      toast(n ? `Downloading ${n} episode${n > 1 ? 's' : ''}` : 'Those are all downloaded already', 'ok');
+    } catch (e) {
+      toast(errorText(e), 'bad');
+    }
+  };
+  const seasonLabel = detail.mediaType === 'anime' ? 'every episode' : detail.seasons.find((s) => s.season === season)?.name || (season === 0 ? 'the specials' : `season ${season}`);
 
   return (
     <Menu
@@ -286,21 +308,21 @@ function DownloadMenu({ detail, intentSeason, intentEpisode }: { detail: Catalog
       up
       width="w-72"
       trigger={(_o, t) => (
-        <IconAction label={job ? `${Math.round(job.progress * 100)}%` : 'Save'} onClick={t} active={Boolean(offline.entries.find((e) => e.itemKey === itemKey))}>
-          {job ? <Spinner className="size-5 text-current" /> : <Download className="size-5" />}
+        <IconAction label={job ? (job.phase === 'downloading' ? `${Math.round(job.progress * 100)}%` : 'Waiting') : working.length > 1 ? `${working.length} downloading` : 'Download'} onClick={t} active={saved}>
+          {job || working.length ? <Spinner className="size-5 text-current" /> : <Download className="size-5" />}
         </IconAction>
       )}
     >
       {(close) => (
         <>
-          {offlineSupported() && (
+          {onDevice && (
             <MenuItem
-              icon={<Smartphone />}
+              icon={saved ? <Trash2 /> : job ? <X /> : <Download />}
               hint={isSeries ? episodeLabel(detail.mediaType, intentSeason, intentEpisode) : undefined}
               onClick={() => {
                 close();
                 if (job) return offline.cancel(itemKey);
-                toast('Finding the best copy to save…');
+                if (saved) return void offline.remove(itemKey).then(() => toast('Download removed'));
                 void offline.saveBest({
                   itemKey,
                   mediaId: detail.id,
@@ -313,45 +335,144 @@ function DownloadMenu({ detail, intentSeason, intentEpisode }: { detail: Catalog
                 });
               }}
             >
-              {job ? 'Cancel saving' : 'Save on this device'}
+              {job ? 'Cancel download' : saved ? 'Remove download' : isSeries ? 'Download this episode' : 'Download'}
             </MenuItem>
           )}
-          {serverDownloads && (
-            <MenuItem
-              icon={<HardDrive />}
-              onClick={() => {
-                close();
-                void toServer();
-              }}
-            >
-              Download to server
-            </MenuItem>
-          )}
-          {serverDownloads && isSeries && (
+          {onDevice && isSeries && (
             <>
               <MenuItem
-                icon={<Zap />}
+                icon={<Layers />}
                 onClick={() => {
                   close();
-                  void rule('new');
+                  void many('season');
+                }}
+              >
+                Download {seasonLabel}
+              </MenuItem>
+              {detail.mediaType !== 'anime' && (
+                <MenuItem
+                  icon={<ListPlus />}
+                  hint="All seasons"
+                  onClick={() => {
+                    close();
+                    void many('missing');
+                  }}
+                >
+                  Download every missing episode
+                </MenuItem>
+              )}
+              <MenuItem
+                icon={<Zap />}
+                active={Boolean(deviceRule)}
+                onClick={async () => {
+                  close();
+                  if (deviceRule) {
+                    useDeviceRules.getState().remove(detail.id);
+                    toast('New episodes no longer download automatically');
+                    return;
+                  }
+                  try {
+                    await enableDeviceRule(detail);
+                    toast('New episodes download to this device as they come out (while Nova is open)', 'ok');
+                  } catch (e) {
+                    toast(errorText(e), 'bad');
+                  }
                 }}
               >
                 Auto-download new episodes
               </MenuItem>
+            </>
+          )}
+          {toServerToo && (
+            <>
+              <div className="mx-3 mt-2 mb-1 text-[11px] font-semibold tracking-wide text-faint uppercase">On the server</div>
               <MenuItem
-                icon={<Zap />}
+                icon={<HardDrive />}
                 onClick={() => {
                   close();
-                  void rule('missing');
+                  void toServer();
                 }}
               >
-                Get every missing episode
+                {isSeries ? 'Download this episode' : 'Download to server'}
               </MenuItem>
+              {isSeries && (
+                <>
+                  <MenuItem
+                    icon={<ListPlus />}
+                    onClick={() => {
+                      close();
+                      void rule('missing');
+                    }}
+                  >
+                    Get every missing episode
+                  </MenuItem>
+                  <MenuItem
+                    icon={<Zap />}
+                    onClick={() => {
+                      close();
+                      void rule('new');
+                    }}
+                  >
+                    Auto-download new episodes
+                  </MenuItem>
+                </>
+              )}
             </>
           )}
         </>
       )}
     </Menu>
+  );
+}
+
+/** Bottom-right of an episode: download it to this device, see how far it is, or remove it again. */
+function EpisodeDownload({ detail, ep }: { detail: CatalogDetail; ep: Episode }) {
+  const itemKey = itemKeyFor(detail.id, ep.season, ep.episode);
+  const job = useOffline((s) => s.jobs[itemKey]);
+  const saved = useOffline((s) => s.entries.some((e) => e.itemKey === itemKey));
+  if (!offlineSupported()) return null;
+  const label = job ? (job.phase === 'downloading' ? `Downloading ${Math.round(job.progress * 100)}% (click to cancel)` : 'Waiting to download (click to cancel)') : saved ? 'Downloaded (click to remove)' : 'Download';
+  const click = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const offline = useOffline.getState();
+    if (job) return offline.cancel(itemKey);
+    if (saved) {
+      if (confirm(`Remove the download of ${episodeLabel(detail.mediaType, ep.season, ep.episode, true)}?`)) void offline.remove(itemKey);
+      return;
+    }
+    void offline.saveBest({
+      itemKey,
+      mediaId: detail.id,
+      mediaType: detail.mediaType,
+      title: detail.title,
+      subtitle: episodeLabel(detail.mediaType, ep.season, ep.episode, true),
+      poster: detail.poster,
+      season: ep.season,
+      episode: ep.episode,
+    });
+  };
+  return (
+    <button
+      onClick={click}
+      aria-label={label}
+      title={label}
+      className={cls('grid size-7 shrink-0 place-items-center rounded-full transition', saved ? 'text-accent' : job ? 'text-fg' : 'text-faint opacity-0 group-hover:opacity-100 hover:text-fg max-sm:opacity-100 focus-visible:opacity-100')}
+    >
+      {job ? (
+        job.phase === 'downloading' ? (
+          <svg viewBox="0 0 20 20" className="size-5 -rotate-90">
+            <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="2.5" />
+            <circle cx="10" cy="10" r="8" fill="none" stroke="var(--a1)" strokeWidth="2.5" strokeLinecap="round" strokeDasharray={`${Math.max(0.04, job.progress) * 50.3} 50.3`} />
+          </svg>
+        ) : (
+          <Spinner className="size-4 text-current" />
+        )
+      ) : saved ? (
+        <HardDriveDownload className="size-5" />
+      ) : (
+        <Download className="size-5" />
+      )}
+    </button>
   );
 }
 
@@ -443,7 +564,7 @@ function EpisodeRow({
           </div>
         )}
       </div>
-      <div className="min-w-0 flex-1 py-1">
+      <div className="flex min-w-0 flex-1 flex-col py-1">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1">
             <div className="text-xs font-semibold text-faint">
@@ -478,7 +599,10 @@ function EpisodeRow({
             </button>
           )}
         </div>
-        {ep.overview && !veiled && <p className="mt-1 line-clamp-2 text-sm text-muted max-sm:hidden">{ep.overview}</p>}
+        <div className="mt-1 flex flex-1 items-end gap-2">
+          <div className="min-w-0 flex-1">{ep.overview && !veiled && <p className="line-clamp-2 text-sm text-muted max-sm:hidden">{ep.overview}</p>}</div>
+          {!upcoming && <EpisodeDownload detail={detail} ep={ep} />}
+        </div>
       </div>
       {discuss && (
         // Portal clicks still bubble through React: keep them from opening the episode.
@@ -490,18 +614,26 @@ function EpisodeRow({
   );
 }
 
-function Episodes({ detail, progress, serverEpisodes, initialSeason, focusEpisode }: { detail: CatalogDetail; progress: Progress[]; serverEpisodes: Set<string>; initialSeason: number; focusEpisode: number | null }) {
+function Episodes({ detail, progress, serverEpisodes, initialSeason, focusEpisode, onSeason }: { detail: CatalogDetail; progress: Progress[]; serverEpisodes: Set<string>; initialSeason: number; focusEpisode: number | null; onSeason: (season: number) => void }) {
   const seasons = detail.mediaType === 'anime' ? [] : detail.seasons.filter((s) => s.episodeCount > 0);
   const [season, setSeason] = useState(initialSeason);
   useEffect(() => setSeason(initialSeason), [initialSeason]);
+  useEffect(() => onSeason(season), [season, onSeason]);
   const { data: episodes, isLoading } = useEpisodes(detail.id, season);
+  // Filler marks come from a slower source; the list shows first and gets its badges when they arrive.
+  const long = detail.mediaType === 'anime' && (episodes?.length ?? 0) >= 20;
+  const filler = useQuery({ queryKey: ['filler', detail.malId], queryFn: () => api.catalog.filler(detail.malId!), enabled: long && Boolean(detail.malId), staleTime: 24 * 3600_000, retry: false });
   const { data: prefs } = usePrefs();
   const connected = useTrackersConnected();
   const entry = useTrackEntry(detail.mediaType === 'anime' ? detail.id : null, connected);
   const trackedProgress = entry.data ? (entry.data.anilist?.progress ?? entry.data.mal?.progress ?? null) : null;
   const [page, setPage] = useState(0);
   const PAGE = 50;
-  const list = episodes ?? [];
+  const list = useMemo(() => {
+    const marks = filler.data;
+    if (!episodes || !marks) return episodes ?? [];
+    return episodes.map((e) => (marks[e.episode] && !e.filler ? { ...e, filler: marks[e.episode] } : e));
+  }, [episodes, filler.data]);
   const pages = Math.ceil(list.length / PAGE);
   const focus = season === initialSeason ? focusEpisode : null;
   useEffect(() => {
@@ -621,6 +753,8 @@ export function Title() {
   const [trailerOn, setTrailerOn] = useState(false);
   const [trailerFailed, setTrailerFailed] = useState(false);
   const [sharing, setSharing] = useState(false);
+  /** The season the episode list shows: "Download season" takes that one. */
+  const [shownSeason, setShownSeason] = useState<number | null>(null);
   const serverFiles = useQuery({ queryKey: ['server-files', mediaId], queryFn: () => api.server.mediaFiles(mediaId), retry: false });
   const airings = useQuery({ queryKey: ['airings', detail?.title], queryFn: () => api.live.airings(detail!.title), enabled: Boolean(detail && session?.settings.liveTvEnabled), retry: false });
   const intent = detail ? playIntent(detail, progress) : null;
@@ -651,6 +785,7 @@ export function Title() {
   if (error || !detail) return <Empty title="Couldn't load this title">{errorText(error)}</Empty>;
 
   const isSeries = detail.mediaType !== 'movie';
+  const firstSeason = focusSeason ?? intent?.season ?? (detail.mediaType === 'anime' ? 1 : (detail.seasons.find((s) => s.season >= 1)?.season ?? 1));
   const titleActions = (contrib?.actions ?? []).filter((a) => a.placement === 'title' && (!a.types?.length || a.types.includes(detail.mediaType)));
   const play = (season?: number | null, episode?: number | null, extra?: Record<string, string>) =>
     navigate(watchPath({ mediaId, season: season ?? intent?.season, episode: episode ?? intent?.episode }, extra));
@@ -724,7 +859,7 @@ export function Title() {
             </IconAction>
             <CollectionsMenu detail={detail} />
             <TrackingAction detail={detail} />
-            <DownloadMenu detail={detail} intentSeason={intent?.season ?? null} intentEpisode={intent?.episode ?? null} />
+            <DownloadMenu detail={detail} intentSeason={intent?.season ?? null} intentEpisode={intent?.episode ?? null} season={shownSeason ?? firstSeason} />
             <IconAction label="Together" onClick={() => play(undefined, undefined, { room: 'new' })}>
               <Users className="size-5" />
             </IconAction>
@@ -823,8 +958,9 @@ export function Title() {
             detail={detail}
             progress={progress ?? []}
             serverEpisodes={serverEpisodes}
-            initialSeason={focusSeason ?? intent?.season ?? (detail.mediaType === 'anime' ? 1 : (detail.seasons.find((s) => s.season >= 1)?.season ?? 1))}
+            initialSeason={firstSeason}
             focusEpisode={focusEpisode}
+            onSeason={setShownSeason}
           />
         )}
 

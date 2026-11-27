@@ -3,6 +3,7 @@ import { newId } from '../lib/crypto.js';
 import { HttpError } from '../lib/http.js';
 import { bestRelease } from '../plugins/sources.js';
 import { DEFAULT_PREFERENCES, migrateTorrentPrefs, type Preferences } from '../services/profiles.js';
+import { warmAnime } from '../services/anilist.js';
 import { requestDownload } from './downloads.js';
 import { airedEpisodes } from './followed.js';
 import { libraryEnabled } from './library.js';
@@ -95,6 +96,8 @@ export interface DownloadRule {
   qualityProfileId: string | null;
   mode: 'new' | 'missing';
   enabled: boolean;
+  /** "New episodes": the last episode that was out when the rule was turned on; only later ones download. */
+  after: { season: number; episode: number } | null;
   lastCheckedAt: string | null;
   createdAt: string;
 }
@@ -109,6 +112,8 @@ interface RuleRow {
   quality_profile_id: string | null;
   mode: 'new' | 'missing';
   enabled: number;
+  after_season: number | null;
+  after_episode: number | null;
   last_checked_at: string | null;
   created_at: string;
 }
@@ -122,6 +127,7 @@ const toRule = (r: RuleRow): DownloadRule => ({
   qualityProfileId: r.quality_profile_id,
   mode: r.mode,
   enabled: r.enabled === 1,
+  after: r.after_episode != null ? { season: r.after_season ?? 1, episode: r.after_episode } : null,
   lastCheckedAt: r.last_checked_at,
   createdAt: r.created_at,
 });
@@ -133,7 +139,18 @@ export function listRules(accountId?: string): DownloadRule[] {
   return rows.map(toRule);
 }
 
-export function upsertRule(input: {
+/** The last episode out right now (0/0 before the first one); null when the listings can't be reached. */
+async function latestAired(mediaId: string): Promise<{ season: number; episode: number } | null> {
+  try {
+    let last = { season: 0, episode: 0 };
+    for (const e of await airedEpisodes(mediaId)) if (e.season > last.season || (e.season === last.season && e.episode > last.episode)) last = { season: e.season, episode: e.episode };
+    return last;
+  } catch {
+    return null;
+  }
+}
+
+export async function upsertRule(input: {
   accountId: string;
   profileId: string | null;
   mediaId: string;
@@ -142,15 +159,20 @@ export function upsertRule(input: {
   qualityProfileId: string | null;
   mode: 'new' | 'missing';
   enabled: boolean;
-}): DownloadRule {
+}): Promise<DownloadRule> {
   if (!libraryEnabled()) throw new HttpError(503, 'Auto-download needs a library volume');
   if (!/^(tv|anime):/.test(input.mediaId)) throw new HttpError(400, 'Auto-download rules are for series');
+  const before = db.prepare('SELECT * FROM download_rules WHERE account_id = ? AND media_id = ?').get(input.accountId, input.mediaId) as RuleRow | undefined;
+  // Turning "new episodes" on (again) starts from what is out now, so nothing from before downloads.
+  const fresh = input.mode === 'new' && input.enabled && (!before || before.mode !== 'new' || before.enabled !== 1 || before.after_episode == null);
+  const after = fresh ? await latestAired(input.mediaId) : before && input.mode === 'new' ? { season: before.after_season, episode: before.after_episode } : null;
   db.prepare(
-    `INSERT INTO download_rules (id, account_id, profile_id, media_id, title, poster, quality_profile_id, mode, enabled)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO download_rules (id, account_id, profile_id, media_id, title, poster, quality_profile_id, mode, enabled, after_season, after_episode)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(account_id, media_id) DO UPDATE SET quality_profile_id = excluded.quality_profile_id,
-       mode = excluded.mode, enabled = excluded.enabled, title = excluded.title, poster = excluded.poster`,
-  ).run(newId(), input.accountId, input.profileId, input.mediaId, input.title, input.poster, input.qualityProfileId, input.mode, input.enabled ? 1 : 0);
+       mode = excluded.mode, enabled = excluded.enabled, title = excluded.title, poster = excluded.poster,
+       after_season = excluded.after_season, after_episode = excluded.after_episode`,
+  ).run(newId(), input.accountId, input.profileId, input.mediaId, input.title, input.poster, input.qualityProfileId, input.mode, input.enabled ? 1 : 0, after?.season ?? null, after?.episode ?? null);
   return toRule(db.prepare('SELECT * FROM download_rules WHERE account_id = ? AND media_id = ?').get(input.accountId, input.mediaId) as RuleRow);
 }
 
@@ -174,10 +196,17 @@ export async function runRule(rule: DownloadRule, maxPerRun = 4): Promise<number
       .all(rule.mediaId, rule.mediaId) as { season: number | null; episode: number | null }[]).map((r) => `${r.season ?? 1}:${r.episode}`),
   );
   const isAnime = rule.mediaId.startsWith('anime:');
-  // Anime has no reliable air dates per episode: "new" = only the latest aired one.
+  const after = rule.after;
+  const isNew = (e: { season: number; episode: number; airDate: string | null }) =>
+    after
+      ? e.season > after.season || (e.season === after.season && e.episode > after.episode)
+      : // Rules from before Nova kept a starting point: anime has no reliable air dates, so only the latest one.
+        isAnime
+        ? e.episode === aired[aired.length - 1]?.episode
+        : (e.airDate ?? '') >= since;
   const wanted = aired
     .filter((e) => !have.has(`${e.season}:${e.episode}`))
-    .filter((e) => (rule.mode === 'missing' ? true : isAnime ? e.episode === aired[aired.length - 1]?.episode : (e.airDate ?? '') >= since))
+    .filter((e) => rule.mode === 'missing' || isNew(e))
     .slice(-maxPerRun);
   const quality = getQualityProfile(rule.qualityProfileId);
   let queued = 0;
@@ -202,7 +231,9 @@ export async function runRule(rule: DownloadRule, maxPerRun = 4): Promise<number
 
 export async function runAllRules(): Promise<void> {
   if (!libraryEnabled()) return;
-  for (const rule of listRules().filter((r) => r.enabled)) {
+  const rules = listRules().filter((r) => r.enabled);
+  await warmAnime(rules.map((r) => r.mediaId));
+  for (const rule of rules) {
     try {
       await runRule(rule);
     } catch (err) {

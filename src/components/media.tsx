@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { Children, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { Check, ChevronLeft, ChevronRight, Info, Play, Plus, X } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Film, Info, Play, Plus, Swords, Tv, X } from 'lucide-react';
 import { cls, episodeLabel, fmtLeft, fmtRuntime, kindLabel, titlePath, watchPath } from '../lib/format';
 import { useDragScroll } from '../lib/dragScroll';
 import { useListToggle, usePrefs, useSummary } from '../lib/queries';
@@ -11,9 +11,21 @@ import { SectionTitle } from './ui';
 
 export type CardItem = Pick<CatalogItem, 'id' | 'mediaType' | 'title' | 'year' | 'poster'> & Partial<CatalogItem>;
 
+/** Stand-in artwork for titles without a (working) poster. */
+export function PosterPlaceholder({ title, mediaType }: { title: string; mediaType?: string }) {
+  const Icon = mediaType === 'movie' ? Film : mediaType === 'anime' ? Swords : Tv;
+  return (
+    <div className="flex size-full flex-col items-center justify-center gap-3 bg-gradient-to-br from-ink-600 via-ink-800 to-ink-900 p-3 text-center">
+      <Icon className="size-8 text-white/25" strokeWidth={1.5} />
+      <span className="line-clamp-4 font-display text-sm leading-snug text-white/60">{title}</span>
+    </div>
+  );
+}
+
 /** The one poster card used everywhere: title, year and length always visible, watched state as a badge. */
 export function PosterCard({ item, className, rank, hint }: { item: CardItem; className?: string; rank?: number; hint?: ReactNode }) {
   const navigate = useNavigate();
+  const [broken, setBroken] = useState(false);
   const summary = useSummary().data?.get(item.id);
   const tracked = useTrackedAnime().get(item.id);
   const { data: prefs } = usePrefs();
@@ -53,10 +65,10 @@ export function PosterCard({ item, className, rank, hint }: { item: CardItem; cl
           </span>
         )}
         <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-ink-800 ring-1 ring-white/6 transition-[translate,box-shadow] duration-200 ease-snap group-hover/card:-translate-y-1.5 group-hover/card:shadow-[0_24px_48px_-16px_rgb(0_0_0/0.9)] group-hover/card:ring-white/20 group-focus-visible/card:ring-2 group-focus-visible/card:ring-accent">
-          {item.poster ? (
-            <img src={item.poster} alt="" loading="lazy" draggable={false} className="size-full object-cover transition-transform duration-300 ease-snap group-hover/card:scale-105" />
+          {item.poster && !broken ? (
+            <img src={item.poster} alt="" loading="lazy" draggable={false} onError={() => setBroken(true)} className="size-full object-cover transition-transform duration-300 ease-snap group-hover/card:scale-105" />
           ) : (
-            <div className="grid size-full place-items-center bg-gradient-to-br from-ink-700 to-ink-900 p-3 text-center font-display text-sm text-muted">{item.title}</div>
+            <PosterPlaceholder title={item.title} mediaType={item.mediaType} />
           )}
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 transition-opacity duration-150 group-hover/card:opacity-100" />
           <div className="absolute inset-x-2 bottom-2 flex translate-y-1 items-center gap-1.5 opacity-0 transition-all duration-150 group-hover/card:translate-y-0 group-hover/card:opacity-100 max-sm:hidden">

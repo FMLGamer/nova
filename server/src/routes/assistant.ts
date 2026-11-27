@@ -140,12 +140,14 @@ assistantRouter.post(
     const tools = [...BUILTIN_TOOLS.filter((t) => !t.admin || isAdmin), ...pluginTools()].map(({ name, description, parameters }) => ({ name, description, parameters }));
     const messages: ChatMessage[] = [{ role: 'system', content: systemPrompt(req.profile!.name, isAdmin, b.context) }, ...history.slice(-30), userMsg];
     try {
-      for (let step = 0; step < 6; step++) {
+      let answered = false;
+      for (let step = 0; step < 6 && !sse.closed(); step++) {
         const out = await chat(b.providerId, req.account!.id, messages, tools);
         if (!out.toolCalls.length) {
           const final: ChatMessage = { role: 'assistant', content: out.text || '…' };
           save(final);
           sse.send('message', { text: final.content });
+          answered = true;
           break;
         }
         const assistantMsg: ChatMessage = { role: 'assistant', content: out.text, toolCalls: out.toolCalls };
@@ -166,6 +168,8 @@ assistantRouter.post(
           save(toolMsg);
         }
       }
+      // A model that only keeps calling tools would otherwise leave the user with no answer at all.
+      if (!answered && !sse.closed()) sse.send('message', { text: "I couldn't finish that in a few steps. Try asking it a bit more specifically." });
       db.prepare("UPDATE assistant_threads SET updated_at = datetime('now') WHERE id = ?").run(threadId);
     } catch (err) {
       sse.send('error', { error: err instanceof Error ? err.message : 'The assistant failed' });

@@ -257,7 +257,7 @@ export async function applyPlan(plan: { name: string; args: Record<string, unkno
     case 'auto_download': {
       if (!libraryEnabled()) throw new HttpError(503, 'No library volume configured');
       const t = await titleInfo(String(a.mediaId));
-      upsertRule({ accountId: ctx.accountId, profileId: ctx.profileId, mediaId: t.mediaId, title: t.title, poster: t.poster, qualityProfileId: null, mode: a.mode === 'missing' ? 'missing' : 'new', enabled: true });
+      await upsertRule({ accountId: ctx.accountId, profileId: ctx.profileId, mediaId: t.mediaId, title: t.title, poster: t.poster, qualityProfileId: null, mode: a.mode === 'missing' ? 'missing' : 'new', enabled: true });
       return 'Auto-download rule saved.';
     }
     case 'fix_match': {

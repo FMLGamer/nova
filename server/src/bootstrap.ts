@@ -23,8 +23,15 @@ export function bootstrapAdmin(): void {
   }
 
   const account = createAccount({ username, passwordHash: hashPassword(password), isAdmin: true });
-  // The desktop app signs its owner in itself; name the profile after the Windows user.
-  const profileName = config.mode === 'desktop' ? (os.userInfo().username || 'Me').slice(0, 30) : username;
+  // The desktop app signs its owner in itself; name the profile after the computer's user (Android has none worth using).
+  const userName = () => {
+    try {
+      return process.platform === 'android' ? '' : os.userInfo().username;
+    } catch {
+      return '';
+    }
+  };
+  const profileName = config.mode === 'desktop' ? (userName() || 'Me').slice(0, 30) : username;
   createProfile(account.id, { name: profileName });
 
   console.log(`[bootstrap] created admin account '${username}'`);

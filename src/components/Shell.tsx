@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { runDeviceRules, useDeviceRules } from '../lib/autoDownload';
 import { desktop, useDesktopInfo } from '../lib/desktop';
 import { cls, relTime, reportIssueUrl } from '../lib/format';
 import { useAppConfig, useContributions, useNotifications, usePrefs, useProfile, useSession } from '../lib/queries';
@@ -477,9 +478,26 @@ class PageBoundary extends Component<{ children: ReactNode }, { error: Error | n
   }
 }
 
+/** "Auto-download new episodes" on this device: looks shortly after opening Nova, then every half hour. */
+function useDeviceAutoDownload() {
+  const { data: session } = useSession();
+  const signedIn = Boolean(session);
+  const rules = useDeviceRules((s) => s.rules.length);
+  useEffect(() => {
+    if (!signedIn || !rules) return;
+    const first = window.setTimeout(() => void runDeviceRules(), 20_000);
+    const every = window.setInterval(() => void runDeviceRules(), 30 * 60_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(every);
+    };
+  }, [signedIn, rules]);
+}
+
 export function Shell() {
   useAppearance();
   useUpdateNotice();
+  useDeviceAutoDownload();
   const location = useLocation();
   const assistantOpen = useApp((s) => s.assistant.open);
   const setPalette = useApp((s) => s.setPalette);

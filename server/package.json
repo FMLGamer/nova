@@ -1,7 +1,7 @@
 {
   "name": "nova-server",
   "private": true,
-  "version": "2.6.0",
+  "version": "2.7.0",
   "type": "module",
   "license": "MIT",
   "description": "Nova server: accounts, profiles, plugin host, streaming and metadata.",

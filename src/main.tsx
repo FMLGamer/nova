@@ -26,6 +26,10 @@ const queryClient = new QueryClient({
 
 if (import.meta.env.PROD) registerSW({ immediate: true });
 
+// Image errors don't bubble: catch them on the way down and let CSS hide the broken image.
+document.addEventListener('error', (e) => e.target instanceof HTMLImageElement && (e.target.dataset.broken = ''), true);
+document.addEventListener('load', (e) => e.target instanceof HTMLImageElement && delete e.target.dataset.broken, true);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

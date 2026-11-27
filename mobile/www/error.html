@@ -18,8 +18,10 @@
     </main>
     <script>
       const saved = localStorage.getItem('nova.server');
-      if (saved) document.getElementById('where').textContent = `${saved.replace(/^https?:\/\//, '')} didn't answer. It may be offline, or this phone may be on another network.`;
-      document.getElementById('retry').onclick = () => (saved ? location.replace(saved) : location.replace('index.html'));
+      // The phone's own server: back to the start page, which starts it again.
+      if (saved === 'local') document.getElementById('where').textContent = 'Nova on this phone stopped. Try again to start it.';
+      else if (saved) document.getElementById('where').textContent = `${saved.replace(/^https?:\/\//, '')} didn't answer. It may be offline, or this phone may be on another network.`;
+      document.getElementById('retry').onclick = () => (saved && saved !== 'local' ? location.replace(saved) : location.replace('index.html'));
       document.getElementById('change').onclick = () => location.replace('index.html?change=1');
     </script>
   </body>

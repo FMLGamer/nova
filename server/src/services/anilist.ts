@@ -1,5 +1,6 @@
 import { anilistQuery } from '../lib/anilist.js';
 import { cached } from '../lib/cache.js';
+import { HttpError } from '../lib/http.js';
 import { stripHtml } from '../lib/upstream.js';
 import type {
   AiringEntry,
@@ -108,166 +109,94 @@ export async function anilistSearch(query: string): Promise<CatalogItem[]> {
       Page(page: 1, perPage: 30) {
         media(type: ANIME, search: $q, isAdult: false, sort: SEARCH_MATCH) {
           ${MEDIA_FIELDS}
+          popularity
         }
       }
     }`;
-  const data = await anilist<{ Page: { media: AniMedia[] } }>(gql, { q: query });
-  return data.Page.media.filter((m) => m.coverImage?.large).map(mapAni);
+  const data = await anilist<{ Page: { media: (AniMedia & { popularity?: number | null })[] } }>(gql, { q: query });
+  return data.Page.media.filter((m) => m.coverImage?.large).map((m) => ({ ...mapAni(m), popularity: m.popularity ?? null }));
 }
 
 export async function anilistDetail(id: string): Promise<CatalogDetail> {
-  return cached(`anilist:detail:${id}`, DAY, async () => {
-    const gql = `
-      query ($id: Int) {
-        Media(id: $id, type: ANIME) {
-          ${MEDIA_FIELDS}
-          idMal
-          studios(isMain: true) { nodes { name } }
-          nextAiringEpisode { episode airingAt }
-          trailer { id site }
-          characters(sort: [ROLE, RELEVANCE], perPage: 12) {
-            edges {
-              role
-              node { name { full } image { medium } }
-              voiceActors(language: JAPANESE, sort: RELEVANCE) { name { full } image { medium } }
-            }
-          }
-          relations {
-            edges {
-              relationType
-              node { id type format title { romaji english } coverImage { medium large } }
-            }
-          }
-        }
-      }`;
-    interface DetailMedia extends AniMedia {
-      idMal?: number | null;
-      trailer?: { id?: string | null; site?: string | null } | null;
-      characters?: {
-        edges?: {
-          role?: string | null;
-          node?: { name?: { full?: string | null }; image?: { medium?: string | null } } | null;
-          voiceActors?: { name?: { full?: string | null }; image?: { medium?: string | null } }[] | null;
-        }[];
-      } | null;
-      relations?: {
-        edges?: {
-          relationType?: string | null;
-          node?: {
-            id?: number;
-            type?: string | null;
-            format?: string | null;
-            title?: { romaji?: string | null; english?: string | null };
-            coverImage?: { medium?: string | null; large?: string | null } | null;
-          } | null;
-        }[];
-      } | null;
-    }
-    const data = await anilist<{ Media: DetailMedia }>(gql, { id: Number(id) });
-    const m = data.Media;
-    const total = m.episodes ?? (m.nextAiringEpisode ? m.nextAiringEpisode.episode - 1 : null);
+  const m = await anilistMedia(id);
+  const total = m.episodes ?? (m.nextAiringEpisode ? m.nextAiringEpisode.episode - 1 : null);
 
-    const trailer =
-      m.trailer?.site === 'youtube' && m.trailer.id ? { site: 'youtube', key: m.trailer.id } : null;
+  const trailer = m.trailer?.site === 'youtube' && m.trailer.id ? { site: 'youtube', key: m.trailer.id } : null;
 
-    const characters: Character[] = (m.characters?.edges ?? [])
-      .filter((e) => e.node?.name?.full)
-      .map((e) => {
-        const va = e.voiceActors?.[0];
-        return {
-          name: e.node!.name!.full!,
-          role: (e.role ?? '').toLowerCase(),
-          image: e.node!.image?.medium ?? null,
-          voiceActor: va?.name?.full ?? null,
-          voiceActorImage: va?.image?.medium ?? null,
-        };
-      });
+  const characters: Character[] = (m.characters?.edges ?? [])
+    .filter((e) => e.node?.name?.full)
+    .map((e) => {
+      const va = e.voiceActors?.[0];
+      return {
+        name: e.node!.name!.full!,
+        role: (e.role ?? '').toLowerCase(),
+        image: e.node!.image?.medium ?? null,
+        voiceActor: va?.name?.full ?? null,
+        voiceActorImage: va?.image?.medium ?? null,
+      };
+    });
 
-    const RELEVANT = new Set(['PREQUEL', 'SEQUEL', 'SIDE_STORY', 'PARENT', 'ALTERNATIVE', 'SPIN_OFF']);
-    const relations: Relation[] = (m.relations?.edges ?? [])
-      .filter(
-        (e) => e.node?.type === 'ANIME' && e.relationType && RELEVANT.has(e.relationType) && e.node?.id,
-      )
-      .map((e) => ({
-        id: `anime:${e.node!.id}`,
-        relationType: e.relationType!,
-        title: e.node!.title?.english || e.node!.title?.romaji || 'Related',
-        format: e.node!.format ?? null,
-        poster: e.node!.coverImage?.large ?? e.node!.coverImage?.medium ?? null,
-      }));
+  const RELEVANT = new Set(['PREQUEL', 'SEQUEL', 'SIDE_STORY', 'PARENT', 'ALTERNATIVE', 'SPIN_OFF']);
+  const relations: Relation[] = (m.relations?.edges ?? [])
+    .filter((e) => e.node?.type === 'ANIME' && e.relationType && RELEVANT.has(e.relationType) && e.node?.id)
+    .map((e) => ({
+      id: `anime:${e.node!.id}`,
+      relationType: e.relationType!,
+      title: e.node!.title?.english || e.node!.title?.romaji || 'Related',
+      format: e.node!.format ?? null,
+      poster: e.node!.coverImage?.large ?? e.node!.coverImage?.medium ?? null,
+    }));
 
-    return {
-      ...mapAni(m),
-      tagline: null,
-      runtime: m.duration ?? null,
-      status: m.status ?? null,
-      seasons: [],
-      cast: [],
-      studios: (m.studios?.nodes ?? []).map((s) => s.name),
-      totalEpisodes: total && total > 0 ? total : null,
-      trailer,
-      characters,
-      relations,
-      malId: m.idMal ?? null,
-      imdbId: null,
-      nextAiring: m.nextAiringEpisode ?? null,
-    };
-  });
+  return {
+    ...mapAni(m),
+    tagline: null,
+    runtime: m.duration ?? null,
+    status: m.status ?? null,
+    seasons: [],
+    cast: [],
+    studios: (m.studios?.nodes ?? []).map((s) => s.name),
+    totalEpisodes: total && total > 0 ? total : null,
+    trailer,
+    characters,
+    relations,
+    malId: m.idMal ?? null,
+    imdbId: null,
+    nextAiring: m.nextAiringEpisode ?? null,
+  };
 }
 
 export async function anilistEpisodes(id: string): Promise<Episode[]> {
-  return cached(`anilist:episodes:${id}`, DAY, async () => {
-    const gql = `
-      query ($id: Int) {
-        Media(id: $id, type: ANIME) {
-          episodes
-          nextAiringEpisode { episode }
-          coverImage { large }
-          streamingEpisodes { title thumbnail }
-        }
-        Page(perPage: 30) { airingSchedules(mediaId: $id, sort: TIME_DESC) { episode airingAt } }
-      }`;
-    const data = await anilist<{
-      Media: {
-        episodes: number | null;
-        nextAiringEpisode: { episode: number } | null;
-        coverImage: { large: string | null } | null;
-        streamingEpisodes: { title: string | null; thumbnail: string | null }[] | null;
-      };
-      Page: { airingSchedules: { episode: number; airingAt: number }[] } | null;
-    }>(gql, { id: Number(id) });
-    const m = data.Media;
-    const airs = new Map((data.Page?.airingSchedules ?? []).map((s) => [s.episode, new Date(s.airingAt * 1000).toISOString()]));
-    const streaming = m.streamingEpisodes ?? [];
-    // AniList's streamingEpisodes are unordered; map each to its real episode
-    // number parsed from the title (e.g. "Episode 12 - ...") and fall back to order.
-    const byNumber = new Map<number, { title: string | null; thumbnail: string | null }>();
-    streaming.forEach((se) => {
-      const n = Number(se.title?.match(/episode\s*(\d+)/i)?.[1]);
-      if (Number.isFinite(n) && !byNumber.has(n)) byNumber.set(n, se);
-    });
-    const aired = m.nextAiringEpisode ? m.nextAiringEpisode.episode - 1 : 0;
-    const total = m.episodes ?? (aired > 0 ? aired : streaming.length);
-    const count = total > 0 ? total : streaming.length;
-    const cover = m.coverImage?.large ?? null;
-    const episodes: Episode[] = [];
-    for (let i = 0; i < count; i++) {
-      const n = i + 1;
-      const se = byNumber.get(n) ?? streaming[i];
-      const cleaned = se?.title?.replace(/^\s*Episode\s*\d+\s*[-:]\s*/i, '').trim();
-      episodes.push({
-        id: `anime:${id}:e${n}`,
-        season: 1,
-        episode: n,
-        title: cleaned && cleaned.length ? cleaned : `Episode ${n}`,
-        overview: '',
-        still: se?.thumbnail ?? cover,
-        airDate: airs.get(n) ?? null,
-        runtime: null,
-      });
-    }
-    return episodes;
+  const m = await anilistMedia(id);
+  const airs = new Map((m.airingSchedule?.nodes ?? []).map((s) => [s.episode, new Date(s.airingAt * 1000).toISOString()]));
+  const streaming = m.streamingEpisodes ?? [];
+  // AniList's streamingEpisodes are unordered; map each to its real episode
+  // number parsed from the title (e.g. "Episode 12 - ...") and fall back to order.
+  const byNumber = new Map<number, { title: string | null; thumbnail: string | null }>();
+  streaming.forEach((se) => {
+    const n = Number(se.title?.match(/episode\s*(\d+)/i)?.[1]);
+    if (Number.isFinite(n) && !byNumber.has(n)) byNumber.set(n, se);
   });
+  const aired = m.nextAiringEpisode ? m.nextAiringEpisode.episode - 1 : 0;
+  const total = m.episodes ?? (aired > 0 ? aired : streaming.length);
+  const count = total > 0 ? total : streaming.length;
+  const cover = m.coverImage?.large ?? null;
+  const episodes: Episode[] = [];
+  for (let i = 0; i < count; i++) {
+    const n = i + 1;
+    const se = byNumber.get(n) ?? streaming[i];
+    const cleaned = se?.title?.replace(/^\s*Episode\s*\d+\s*[-:]\s*/i, '').trim();
+    episodes.push({
+      id: `anime:${id}:e${n}`,
+      season: 1,
+      episode: n,
+      title: cleaned && cleaned.length ? cleaned : `Episode ${n}`,
+      overview: '',
+      still: se?.thumbnail ?? cover,
+      airDate: airs.get(n) ?? null,
+      runtime: null,
+    });
+  }
+  return episodes;
 }
 
 /** Every name an anime goes by — indexers often only know the romaji one. */
@@ -279,24 +208,119 @@ export async function anilistTitles(id: string): Promise<{
   format: string | null;
   seasonYear: number | null;
 }> {
-  return cached(`anilist:titles:${id}`, 7 * DAY, async () => {
-    const gql = `
-      query ($id: Int) {
-        Media(id: $id, type: ANIME) { title { romaji english native } synonyms format seasonYear }
-      }`;
-    const data = await anilist<{
-      Media: { title: AniTitle; synonyms?: string[] | null; format?: string | null; seasonYear?: number | null };
-    }>(gql, { id: Number(id) });
-    const m = data.Media;
-    return {
-      romaji: m.title.romaji ?? null,
-      english: m.title.english ?? null,
-      native: m.title.native ?? null,
-      synonyms: (m.synonyms ?? []).filter((s) => /^[\x20-\x7e]+$/.test(s)).slice(0, 6),
-      format: m.format ?? null,
-      seasonYear: m.seasonYear ?? null,
-    };
+  const m = await anilistMedia(id);
+  return {
+    romaji: m.title.romaji ?? null,
+    english: m.title.english ?? null,
+    native: m.title.native ?? null,
+    synonyms: (m.synonyms ?? []).filter((s) => /^[\x20-\x7e]+$/.test(s)).slice(0, 6),
+    format: m.format ?? null,
+    seasonYear: m.seasonYear ?? null,
+  };
+}
+
+/*
+ * Everything Nova shows about one anime — detail, episode names and thumbnails, upcoming air times and every
+ * title it goes by — comes from a single cached copy of its AniList entry. Titles asked for at about the same
+ * time (a page of recommendations, stats, Up next) are fetched together: AniList answers up to 50 of them in one
+ * request, and every request counts against its rate limit no matter how much it returns.
+ */
+interface FullMedia extends AniMedia {
+  idMal?: number | null;
+  synonyms?: string[] | null;
+  trailer?: { id?: string | null; site?: string | null } | null;
+  streamingEpisodes?: { title: string | null; thumbnail: string | null }[] | null;
+  airingSchedule?: { nodes?: { episode: number; airingAt: number }[] | null } | null;
+  characters?: {
+    edges?: {
+      role?: string | null;
+      node?: { name?: { full?: string | null }; image?: { medium?: string | null } } | null;
+      voiceActors?: { name?: { full?: string | null }; image?: { medium?: string | null } }[] | null;
+    }[];
+  } | null;
+  relations?: {
+    edges?: {
+      relationType?: string | null;
+      node?: {
+        id?: number;
+        type?: string | null;
+        format?: string | null;
+        title?: { romaji?: string | null; english?: string | null };
+        coverImage?: { medium?: string | null; large?: string | null } | null;
+      } | null;
+    }[];
+  } | null;
+}
+
+const FULL_FIELDS = `
+  ${MEDIA_FIELDS}
+  idMal
+  synonyms
+  studios(isMain: true) { nodes { name } }
+  nextAiringEpisode { episode airingAt }
+  trailer { id site }
+  streamingEpisodes { title thumbnail }
+  airingSchedule(notYetAired: true, perPage: 12) { nodes { episode airingAt } }
+  characters(sort: [ROLE, RELEVANCE], perPage: 12) {
+    edges {
+      role
+      node { name { full } image { medium } }
+      voiceActors(language: JAPANESE, sort: RELEVANCE) { name { full } image { medium } }
+    }
+  }
+  relations {
+    edges {
+      relationType
+      node { id type format title { romaji english } coverImage { medium large } }
+    }
+  }
+`;
+const BATCH = 50;
+const GATHER_MS = 30;
+const queued = new Map<number, { resolve: (m: FullMedia) => void; reject: (e: unknown) => void }[]>();
+let gathering: NodeJS.Timeout | null = null;
+
+async function flushMedia(): Promise<void> {
+  gathering = null;
+  const batch = [...queued.entries()].slice(0, BATCH);
+  for (const [id] of batch) queued.delete(id);
+  if (queued.size) gathering = setTimeout(() => void flushMedia(), 0);
+  try {
+    const data = await anilist<{ Page: { media: FullMedia[] } }>(
+      `query ($ids: [Int]) { Page(perPage: ${BATCH}) { media(id_in: $ids, type: ANIME) { ${FULL_FIELDS} } } }`,
+      { ids: batch.map(([id]) => id) },
+    );
+    const byId = new Map(data.Page.media.map((m) => [m.id, m]));
+    for (const [id, waiters] of batch) {
+      const m = byId.get(id);
+      for (const w of waiters) {
+        if (m) w.resolve(m);
+        else w.reject(new HttpError(404, 'Not found on AniList'));
+      }
+    }
+  } catch (err) {
+    for (const [, waiters] of batch) for (const w of waiters) w.reject(err);
+  }
+}
+
+function fetchMedia(id: number): Promise<FullMedia> {
+  if (!Number.isInteger(id) || id <= 0) return Promise.reject(new HttpError(404, 'Not found on AniList'));
+  return new Promise((resolve, reject) => {
+    const waiters = queued.get(id) ?? [];
+    waiters.push({ resolve, reject });
+    queued.set(id, waiters);
+    gathering ??= setTimeout(() => void flushMedia(), GATHER_MS);
   });
+}
+
+function anilistMedia(id: string): Promise<FullMedia> {
+  return cached(`anilist:media:${id}`, 12 * 60 * 60 * 1000, () => fetchMedia(Number(id)));
+}
+
+/** Fetches (in as few requests as possible) every anime in `mediaIds` that isn't cached yet; others are ignored. */
+export async function warmAnime(mediaIds: string[]): Promise<void> {
+  const ids = [...new Set(mediaIds.filter((m) => m.startsWith('anime:')).map((m) => m.slice(6)))];
+  await Promise.all(ids.map((id) => anilistMedia(id).catch(() => null)));
 }
 
 export async function anilistBrowse(opts: { genre?: string; sort?: string; page?: number; format?: string }): Promise<CatalogItem[]> {

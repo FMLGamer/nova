@@ -140,6 +140,42 @@ input[type='range'] {
   accent-color: var(--a1);
 }
 
+/* An image that failed to load (main.tsx marks it) shows its frame's own background, not the browser's broken icon. */
+img[data-broken] {
+  visibility: hidden;
+}
+
+/* Settings search: cards and pages without a matching row step aside (a page whose name matches shows whole). */
+[data-searching] [data-section]:not([data-all]) [data-group]:not([data-hit]):not(:has([data-hit])),
+[data-searching] [data-section]:not([data-all]):not(:has([data-hit])) {
+  display: none;
+}
+[data-searching]:has([data-hit], [data-all]) [data-search-empty] {
+  display: none;
+}
+
+/* The browser draws a select's list from the select's own (almost transparent) colours: give it a solid dark one. */
+select {
+  color-scheme: dark;
+}
+select option,
+select optgroup {
+  background-color: var(--color-ink-800);
+  color: var(--color-fg);
+}
+select option:checked {
+  background-color: var(--color-ink-600);
+}
+
+/* Popover menus sit over posters and banners: nearly opaque, so their text always reads. */
+@utility menu-surface {
+  background: rgb(22 22 34 / 0.97);
+  backdrop-filter: blur(24px) saturate(1.3);
+  -webkit-backdrop-filter: blur(24px) saturate(1.3);
+  border: 1px solid rgb(255 255 255 / 0.12);
+  box-shadow: 0 24px 60px -12px rgb(0 0 0 / 0.85);
+}
+
 @utility glass {
   background: rgb(18 18 28 / 0.62);
   backdrop-filter: blur(22px) saturate(1.4);

@@ -1,7 +1,7 @@
 import { db } from '../db/index.js';
 import { cached } from '../lib/cache.js';
 import { parseMediaId } from '../media/types.js';
-import { anilistAiring, anilistDetail } from '../services/anilist.js';
+import { anilistAiring, anilistDetail, warmAnime } from '../services/anilist.js';
 import { tmdbDetail, tmdbEpisodes } from '../services/tmdb.js';
 import { libraryEnabled } from './library.js';
 
@@ -108,7 +108,9 @@ export interface MissingSeries {
 export async function missingEpisodes(profileId: string, accountId: string): Promise<MissingSeries[]> {
   if (!libraryEnabled()) return [];
   const out: MissingSeries[] = [];
-  for (const f of followedSeries(profileId, accountId)) {
+  const series = followedSeries(profileId, accountId);
+  await warmAnime(series.map((f) => f.mediaId));
+  for (const f of series) {
     try {
       const aired = await airedEpisodes(f.mediaId);
       if (!aired.length) continue;

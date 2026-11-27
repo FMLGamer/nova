@@ -24,6 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { useDeviceRules } from '../lib/autoDownload';
 import { cls, episodeLabel, fmtAirTime, fmtBytes, fmtSpeed, relTime, titlePath, watchPath } from '../lib/format';
 import { useOffline } from '../lib/offline';
 import { useCollections, useMyList, useSession } from '../lib/queries';
@@ -260,6 +261,9 @@ function Downloads() {
   const server = useQuery({ queryKey: ['server-downloads'], queryFn: () => api.server.downloads(), refetchInterval: 4000, enabled: Boolean(session?.settings.downloadsEnabled) });
   const missing = useQuery({ queryKey: ['missing'], queryFn: api.server.missing, enabled: Boolean(session?.settings.downloadsEnabled), staleTime: 10 * 60_000 });
   const rules = useQuery({ queryKey: ['rules'], queryFn: () => api.server.rules() });
+  const deviceRules = useDeviceRules((s) => s.rules);
+  // Server downloads show when the server offers them, or when some are still around from before.
+  const serverSide = Boolean(session?.settings.downloadsEnabled && (session.server?.serverDownloads || server.data?.length || rules.data?.length));
   const jobs = Object.values(offline.jobs);
   const act = async (fn: () => Promise<unknown>, msg?: string) => {
     try {
@@ -286,13 +290,13 @@ function Downloads() {
               <div className="truncate text-sm font-semibold">{j.title}</div>
               <Progress value={j.progress} className="mt-2" />
             </div>
-            <span className="text-xs text-muted tabular-nums">{j.phase === 'finding' ? 'Finding…' : `${Math.round(j.progress * 100)}%`}</span>
+            <span className="text-xs text-muted tabular-nums">{j.phase === 'queued' ? 'Waiting…' : j.phase === 'finding' ? 'Finding…' : `${Math.round(j.progress * 100)}%`}</span>
             <button onClick={() => offline.cancel(j.itemKey)} aria-label="Cancel" className="rounded-full p-2 text-muted hover:bg-white/8 hover:text-fg">
               <X className="size-4" />
             </button>
           </div>
         ))}
-        {!offline.entries.length && !jobs.length && <p className="text-sm text-muted">Save episodes and movies from their page or the player to watch them without a connection.</p>}
+        {!offline.entries.length && !jobs.length && <p className="text-sm text-muted">Download episodes and movies from their page (or a whole season at once) to watch them without a connection.</p>}
         <div className="grid gap-2 sm:grid-cols-2">
           {offline.entries.map((e) => (
             <div key={e.itemKey} className="group flex items-center gap-3 rounded-2xl border border-line p-2.5">
@@ -314,14 +318,37 @@ function Downloads() {
             </div>
           ))}
         </div>
+        {deviceRules.length > 0 && (
+          <div className="mt-6">
+            <h3 className="mb-2 flex items-center gap-2 text-sm font-semibold text-muted">
+              <Zap className="size-4 text-accent" /> New episodes download automatically (while Nova is open)
+            </h3>
+            <div className="space-y-2">
+              {deviceRules.map((r) => (
+                <div key={r.mediaId} className="flex items-center gap-3 rounded-2xl border border-line p-2.5">
+                  {r.poster && <img src={r.poster} alt="" className="h-12 w-8 shrink-0 rounded-md object-cover" />}
+                  <div className="min-w-0 flex-1">
+                    <Link to={titlePath(r.mediaId)} className="block truncate text-sm font-semibold hover:underline">
+                      {r.title}
+                    </Link>
+                    <div className="text-xs text-faint">After {r.after.episode ? episodeLabel(r.mediaType, r.after.season, r.after.episode) : 'the first episode'} · on since {relTime(new Date(r.createdAt).toISOString())}</div>
+                  </div>
+                  <button onClick={() => useDeviceRules.getState().remove(r.mediaId)} aria-label="Stop auto-downloading" title="Stop auto-downloading" className="rounded-full p-2 text-muted hover:bg-white/8 hover:text-bad">
+                    <Trash2 className="size-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
 
-      {session?.settings.downloadsEnabled && (
+      {serverSide && (
         <section>
           <h2 className="mb-4 flex items-center gap-2 font-display text-xl font-semibold">
             <HardDrive className="size-5 text-accent" /> On the server
           </h2>
-          {!server.data?.length && <p className="text-sm text-muted">Nothing queued. Download any release to the server from the player's source list.</p>}
+          {!server.data?.length && <p className="text-sm text-muted">Nothing queued. Download to the server from a title's Download menu.</p>}
           <div className="space-y-2">
             {server.data?.map((d) => (
               <div key={d.id} className="flex items-center gap-4 rounded-2xl border border-line p-3">
@@ -355,7 +382,7 @@ function Downloads() {
         </section>
       )}
 
-      {missing.data && missing.data.length > 0 && (
+      {serverSide && missing.data && missing.data.length > 0 && (
         <section>
           <h2 className="mb-1 font-display text-xl font-semibold">Missing episodes</h2>
           <p className="mb-4 text-sm text-muted">Aired episodes of shows you follow that aren't on the server yet.</p>
@@ -390,7 +417,7 @@ function Downloads() {
       {rules.data && rules.data.length > 0 && (
         <section>
           <h2 className="mb-4 flex items-center gap-2 font-display text-xl font-semibold">
-            <Zap className="size-5 text-accent" /> Auto-download
+            <Zap className="size-5 text-accent" /> Auto-download to the server
           </h2>
           <div className="space-y-2">
             {rules.data.map((r) => (
@@ -399,7 +426,7 @@ function Downloads() {
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-semibold">{r.title}</div>
                   <div className="text-xs text-faint">
-                    {r.mode === 'new' ? 'New episodes as they air' : 'Everything missing'}
+                    {r.mode === 'new' ? (r.after?.episode ? `New episodes after ${episodeLabel(r.mediaId.split(':')[0]!, r.after.season, r.after.episode)}` : 'New episodes as they air') : 'Everything missing'}
                     {r.lastCheckedAt ? ` · checked ${relTime(r.lastCheckedAt)}` : ''}
                   </div>
                 </div>

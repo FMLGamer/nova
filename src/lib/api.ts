@@ -120,7 +120,7 @@ export const api = {
     readFree: (title: string, author: string | null) => get<{ epub: string | null }>('/api/catalog/read/free', { title, ...(author ? { author } : {}) }).then((r) => r.epub),
     readSearch: (q: string) => get<{ items: T.ReadItem[] }>('/api/catalog/read/search', { q }).then((r) => r.items),
     schedule: (week: number) => get<{ schedule: T.AiringEntry[] }>('/api/catalog/anime/schedule', { week }).then((r) => r.schedule),
-    search: (q: string) => get<{ movies: T.CatalogItem[]; shows: T.CatalogItem[]; anime: T.CatalogItem[] }>('/api/catalog/search', { q }),
+    search: (q: string) => get<{ top: T.CatalogItem[]; movies: T.CatalogItem[]; shows: T.CatalogItem[]; anime: T.CatalogItem[] }>('/api/catalog/search', { q }),
     because: (mediaId: string) => {
       const [t, id] = mediaId.split(':');
       return get<{ title: string; items: T.CatalogItem[] }>(`/api/catalog/because/${t}/${id}`);
@@ -134,6 +134,7 @@ export const api = {
       return get<{ episodes: T.Episode[] }>(`/api/catalog/${t}/${id}/episodes`, { season }).then((r) => r.episodes);
     },
     aniskip: (malId: number, episode: number) => get<T.SkipTimes>(`/api/catalog/aniskip/${malId}/${episode}`),
+    filler: (malId: number) => get<{ marks: Record<string, 'filler' | 'recap'> }>(`/api/catalog/filler/${malId}`).then((r) => r.marks),
     subtitlesStatus: () => get<{ configured: boolean }>('/api/catalog/subtitles/status').then((r) => r.configured),
     subtitles: (q: { imdbId?: string; query?: string; season?: number; episode?: number; languages?: string; kind?: 'movie' | 'episode' }) =>
       get<{ subtitles: T.SubtitleOption[] }>('/api/catalog/subtitles', q).then((r) => r.subtitles),
@@ -309,6 +310,8 @@ export const api = {
     overview: () => get<T.AdminOverview>('/api/admin/overview'),
     integrations: () => get<{ integrations: Record<string, { set: boolean; fromEnv: boolean }> }>('/api/admin/integrations').then((r) => r.integrations),
     saveIntegrations: (b: Record<string, string>) => put<{ integrations: Record<string, { set: boolean; fromEnv: boolean }> }>('/api/admin/integrations', b),
+    options: () => get<{ options: { serverDownloads: boolean } }>('/api/admin/options').then((r) => r.options),
+    saveOptions: (b: { serverDownloads?: boolean }) => put<{ options: { serverDownloads: boolean } }>('/api/admin/options', b).then((r) => r.options),
     updateAccount: (id: string, b: Partial<T.AccountSettings>) =>
       patch<{ settings: T.AccountSettings }>(`/api/admin/accounts/${id}`, b).then((r) => r.settings),
     deleteAccount: (id: string) => del(`/api/admin/accounts/${id}`),

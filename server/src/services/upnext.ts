@@ -1,5 +1,6 @@
 import { db } from '../db/index.js';
 import { cached } from '../lib/cache.js';
+import { warmAnime } from './anilist.js';
 import { detailFor, episodesFor } from './catalog.js';
 
 export interface UpNext {
@@ -51,7 +52,9 @@ export async function upNext(profileId: string): Promise<UpNext[]> {
       byMedia.set(r.media_id, list);
     }
     const out: UpNext[] = [];
-    for (const [mediaId, list] of [...byMedia.entries()].slice(0, 24)) {
+    const candidates = [...byMedia.entries()].slice(0, 24);
+    await warmAnime(candidates.map(([mediaId]) => mediaId));
+    for (const [mediaId, list] of candidates) {
       const done = (r: Row) => r.finished === 1 || (r.duration_seconds ? r.position_seconds / r.duration_seconds > 0.9 : false);
       // Skip series with a half-watched episode: that one belongs to Continue Watching.
       if (list.some((r) => !done(r) && r.position_seconds > 30)) continue;

@@ -5,6 +5,11 @@ server/node_modules/
 # build output
 dist/
 server/dist/
+/build/
+# Nova for Android's bundled server and Node.js (made by mobile/scripts/bundle-android.mjs)
+mobile/android/app/src/main/jniLibs/
+mobile/android/app/src/main/assets/nova-server.*
+mobile/android/app/src/main/assets/nova-cacert.pem
 
 # local data / sqlite
 data/

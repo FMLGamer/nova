@@ -270,7 +270,7 @@ serverLibraryRouter.post(
   requireProfile,
   asyncHandler(async (req, res) => {
     const body = parse(ruleSchema, req.body);
-    const rule = upsertRule({
+    const rule = await upsertRule({
       accountId: req.account!.id,
       profileId: req.profile!.id,
       mediaId: body.mediaId,

@@ -38,6 +38,13 @@ android {
             signingConfig System.getenv('NOVA_KEYSTORE') ? signingConfigs.release : signingConfigs.debug
         }
     }
+    // The phone's own server (mobile/scripts/bundle-android.mjs): Node.js and its libraries must be installed as
+    // real files in the native library folder, the one place Android lets an app run programs from.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
 }
 
 repositories {

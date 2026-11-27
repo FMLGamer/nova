@@ -14,6 +14,8 @@ export interface CatalogItem {
   rating: number | null; // 0..10
   runtime: number | null; // minutes, when known
   genres: string[];
+  /** How many people follow it (AniList), when the source says; used to rank search results. */
+  popularity?: number | null;
 }
 
 export interface Episode {

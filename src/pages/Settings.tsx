@@ -1,47 +1,40 @@
 import { motion } from 'motion/react';
-import { useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { NavLink, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, FlaskConical, KeyRound, LayoutGrid, Link2, Palette, Play, Plus, Sparkles, Subtitles, Trash2, UserRound, Gauge, BookOpen, Info, ListChecks } from 'lucide-react';
+import { Copy, KeyRound, LayoutGrid, Link2, Palette, Play, Plus, Sparkles, Subtitles, Trash2, UserRound, BookOpen, Info, ListChecks, SlidersHorizontal } from 'lucide-react';
 import { api } from '../lib/api';
 import { cls, LANGUAGES, relTime, reportIssueUrl } from '../lib/format';
+import { fuzzyMatch } from '../lib/fuzzy';
 import { useAppConfig, usePrefs, useProfile, useSavePrefs, useSession } from '../lib/queries';
 import { READING_FONTS } from '../lib/reading-fonts';
 import { errorText, toast } from '../lib/store';
 import { PLATFORM_NAME, desktop, useDesktopInfo, type DesktopSettings } from '../lib/desktop';
 import { androidApp, switchServer } from '../lib/mobile';
 import type { AssistantProvider, Preferences, SubtitleStyle } from '../lib/types';
-import { Avatar, Badge, Button, Card, Chip, Input, Row, Segmented, Select, Slider, Spinner, Switch, TextArea } from '../components/ui';
+import { Avatar, Badge, Button, Card, Chip, Input, Row, Segmented, Select, SettingsFilter, SettingsGroup as Group, SettingsSearch, Slider, Spinner, Switch, TextArea } from '../components/ui';
 import { cueStyle } from '../components/player/subtitles';
 import { SHORTCUTS, keyLabel, shortcutMap } from '../components/player/shortcuts';
 import { ProfileEditor } from './Profiles';
 import { BetaSection, CustomizeSection, ImportHistory } from './SettingsCustomize';
 import { themeColors } from '../components/reader/common';
 
+/** The menu, in categories; whatever only some people need lives under Advanced. */
 const SECTIONS = [
-  { id: '', label: 'Profile', icon: UserRound },
-  { id: 'playback', label: 'Playback', icon: Play },
-  { id: 'subtitles', label: 'Subtitles', icon: Subtitles },
-  { id: 'sources', label: 'Sources & quality', icon: Gauge },
-  { id: 'reading', label: 'Reading', icon: BookOpen },
-  { id: 'customize', label: 'Customize', icon: LayoutGrid },
-  { id: 'appearance', label: 'Appearance', icon: Palette },
-  { id: 'assistant', label: 'Assistant', icon: Sparkles },
-  { id: 'account', label: 'Account & sharing', icon: KeyRound },
-  { id: 'tracking', label: 'Anime & manga tracking', icon: ListChecks },
-  { id: 'beta', label: 'Beta', icon: FlaskConical },
-  { id: 'about', label: 'About Nova', icon: Info },
+  { id: '', label: 'Profile', icon: UserRound, group: 'You' },
+  { id: 'account', label: 'Account & sharing', icon: KeyRound, group: 'You' },
+  { id: 'tracking', label: 'Anime & manga tracking', icon: ListChecks, group: 'You' },
+  { id: 'playback', label: 'Playback', icon: Play, group: 'Watching & reading' },
+  { id: 'subtitles', label: 'Subtitles', icon: Subtitles, group: 'Watching & reading' },
+  { id: 'reading', label: 'Reading', icon: BookOpen, group: 'Watching & reading' },
+  { id: 'appearance', label: 'Appearance', icon: Palette, group: 'Look & feel' },
+  { id: 'customize', label: 'Pages & menus', icon: LayoutGrid, group: 'Look & feel' },
+  { id: 'assistant', label: 'Assistant', icon: Sparkles, group: 'Nova' },
+  { id: 'about', label: 'About & updates', icon: Info, group: 'Nova' },
+  { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal, group: 'Advanced' },
 ];
-
-function Group({ title, children, hint }: { title: string; children: ReactNode; hint?: ReactNode }) {
-  return (
-    <Card className="mb-5">
-      <h3 className="font-display text-lg font-semibold">{title}</h3>
-      {hint && <p className="mt-1 text-sm text-muted">{hint}</p>}
-      <div className="mt-2 divide-y divide-line">{children}</div>
-    </Card>
-  );
-}
+/** Pages that moved into Advanced, for old links. */
+const MOVED: Record<string, string> = { home: 'customize', sources: 'advanced', beta: 'advanced' };
 
 function MultiChips({ value, options, onChange }: { value: string[]; options: { value: string; label: string }[]; onChange: (v: string[]) => void }) {
   return (
@@ -143,8 +136,9 @@ function ShortcutsGroup({ p, set }: { p: Preferences; set: (x: object) => void }
 }
 
 function PlaybackSection({ p, set }: { p: Preferences; set: (x: object) => void }) {
-  const { data: session } = useSession();
   const ui = p.ui;
+  const dub = p.anime.audioLanguages;
+  const animeAudio = dub.length === 1 && dub[0] === 'ja' ? 'sub' : dub[0] === 'ja' ? 'dual' : 'dub';
   return (
     <>
       <Group title="Starting things">
@@ -163,6 +157,9 @@ function PlaybackSection({ p, set }: { p: Preferences; set: (x: object) => void 
         <Row label="Skip credits automatically" hint="Jumps straight to the next episode when there is one.">
           <Switch checked={ui.skipCreditsAutomatically} onChange={(v) => set({ ui: { skipCreditsAutomatically: v } })} />
         </Row>
+        <Row label="Skip without intro data" hint="When Nova doesn't know where an episode's intro or credits are, Skip jumps ahead this far. Off hides the button then." stack>
+          <Slider value={ui.skipFallbackSeconds} min={0} max={180} step={5} onChange={(v) => set({ ui: { skipFallbackSeconds: v } })} format={(v) => (v ? `${v} s` : 'Off')} />
+        </Row>
         <Row label="Default speed" stack>
           <Slider value={ui.playbackSpeed} min={0.25} max={3} step={0.05} onChange={(v) => set({ ui: { playbackSpeed: Math.round(v * 100) / 100 } })} format={(v) => `${v.toFixed(2)}×`} />
         </Row>
@@ -180,34 +177,58 @@ function PlaybackSection({ p, set }: { p: Preferences; set: (x: object) => void 
             <option value="custom">Custom GLSL</option>
           </Select>
         </Row>
-        <Row stack label="Custom shader chain" hint={<>GLSL ES 3 passes separated by <code>//!PASS</code>. Each defines <code>vec4 hook(sampler2D tex, vec2 uv, vec2 px)</code>; <code>luma()</code> and <code>t</code> are available.</>}>
-          <TextArea
-            defaultValue={ui.customShader}
-            onBlur={(e) => set({ ui: { customShader: e.target.value } })}
-            className="min-h-40 font-mono text-xs"
-            placeholder={'vec4 hook(sampler2D tex, vec2 uv, vec2 px){\n  vec4 c = texture(tex, uv);\n  return vec4(pow(c.rgb, vec3(0.95)), 1.);\n}'}
-          />
-        </Row>
-      </Group>
-      <Group title="Compatibility">
-        {session?.settings.transcodingEnabled ? (
-          <>
-            <Row label="Always transcode" hint="Converts every stream on the server. Use for weak devices; costs quality and server CPU.">
-              <Switch checked={ui.transcode} onChange={(v) => set({ ui: { transcode: v } })} />
-            </Row>
-            <Row label="Transcode resolution">
-              <Segmented size="sm" value={String(ui.transcodeHeight)} onChange={(v) => set({ ui: { transcodeHeight: Number(v) } })} options={[{ value: '480', label: '480p' }, { value: '720', label: '720p' }, { value: '1080', label: '1080p' }]} />
-            </Row>
-          </>
-        ) : (
-          <p className="py-3 text-sm text-muted">Nova fixes unplayable audio on the fly. Full video transcoding needs an admin to enable it for your account.</p>
+        {ui.enhance === 'custom' && (
+          <Row stack label="Custom shader chain" hint={<>GLSL ES 3 passes separated by <code>//!PASS</code>. Each defines <code>vec4 hook(sampler2D tex, vec2 uv, vec2 px)</code>; <code>luma()</code> and <code>t</code> are available.</>}>
+            <TextArea
+              defaultValue={ui.customShader}
+              onBlur={(e) => set({ ui: { customShader: e.target.value } })}
+              className="min-h-40 font-mono text-xs"
+              placeholder={'vec4 hook(sampler2D tex, vec2 uv, vec2 px){\n  vec4 c = texture(tex, uv);\n  return vec4(pow(c.rgb, vec3(0.95)), 1.);\n}'}
+            />
+          </Row>
         )}
-        <Row label="Preferred external player" hint="Highlighted in the player's “Open in” menu.">
-          <Segmented size="sm" value={ui.externalPlayer || 'none'} onChange={(v) => set({ ui: { externalPlayer: v === 'none' ? '' : v } })} options={[{ value: 'none', label: 'None' }, { value: 'vlc', label: 'VLC' }, { value: 'mpv', label: 'mpv' }, { value: 'iina', label: 'IINA' }]} />
+      </Group>
+      <Group title="Anime">
+        <Row label="Audio">
+          <Segmented
+            size="sm"
+            value={animeAudio}
+            onChange={(v) => set({ anime: { audioLanguages: v === 'sub' ? ['ja'] : v === 'dual' ? ['ja', 'en'] : ['en', 'ja'] } })}
+            options={[
+              { value: 'sub', label: 'Japanese only' },
+              { value: 'dual', label: 'Either' },
+              { value: 'dub', label: 'Prefer English dub' },
+            ]}
+          />
         </Row>
       </Group>
       <ShortcutsGroup p={p} set={set} />
     </>
+  );
+}
+
+/** Advanced: transcoding and outside players. */
+function CompatibilityGroup({ p, set }: { p: Preferences; set: (x: object) => void }) {
+  const { data: session } = useSession();
+  const ui = p.ui;
+  return (
+    <Group title="Compatibility">
+      {session?.settings.transcodingEnabled ? (
+        <>
+          <Row label="Always transcode" hint="Converts every stream on the server. Use for weak devices; costs quality and server CPU.">
+            <Switch checked={ui.transcode} onChange={(v) => set({ ui: { transcode: v } })} />
+          </Row>
+          <Row label="Transcode resolution">
+            <Segmented size="sm" value={String(ui.transcodeHeight)} onChange={(v) => set({ ui: { transcodeHeight: Number(v) } })} options={[{ value: '480', label: '480p' }, { value: '720', label: '720p' }, { value: '1080', label: '1080p' }]} />
+          </Row>
+        </>
+      ) : (
+        <p className="py-3 text-sm text-muted">Nova fixes unplayable audio on the fly. Full video transcoding needs an admin to enable it for your account.</p>
+      )}
+      <Row label="Preferred external player" hint="Highlighted in the player's “Open in” menu.">
+        <Segmented size="sm" value={ui.externalPlayer || 'none'} onChange={(v) => set({ ui: { externalPlayer: v === 'none' ? '' : v } })} options={[{ value: 'none', label: 'None' }, { value: 'vlc', label: 'VLC' }, { value: 'mpv', label: 'mpv' }, { value: 'iina', label: 'IINA' }]} />
+      </Row>
+    </Group>
   );
 }
 
@@ -309,10 +330,8 @@ const SOURCES = [
   { value: 'dvd', label: 'DVD' },
 ];
 
-function SourcesSection({ p, set }: { p: Preferences; set: (x: object) => void }) {
+function SourcesGroups({ p, set }: { p: Preferences; set: (x: object) => void }) {
   const t = p.torrent;
-  const dub = p.anime.audioLanguages;
-  const animeAudio = dub.length === 1 && dub[0] === 'ja' ? 'sub' : dub[0] === 'ja' ? 'dual' : 'dub';
   return (
     <>
       <Group
@@ -344,19 +363,7 @@ function SourcesSection({ p, set }: { p: Preferences; set: (x: object) => void }
           <Switch checked={t.allowHdr} onChange={(v) => set({ torrent: { allowHdr: v } })} />
         </Row>
       </Group>
-      <Group title="Anime">
-        <Row label="Audio">
-          <Segmented
-            size="sm"
-            value={animeAudio}
-            onChange={(v) => set({ anime: { audioLanguages: v === 'sub' ? ['ja'] : v === 'dual' ? ['ja', 'en'] : ['en', 'ja'] } })}
-            options={[
-              { value: 'sub', label: 'Japanese only' },
-              { value: 'dual', label: 'Either' },
-              { value: 'dub', label: 'Prefer English dub' },
-            ]}
-          />
-        </Row>
+      <Group title="Anime releases">
         <Row label="Prefer releases with subtitles inside" hint="Perfect sync, no lookup needed.">
           <Switch checked={p.anime.preferEmbeddedSubs} onChange={(v) => set({ anime: { preferEmbeddedSubs: v } })} />
         </Row>
@@ -460,18 +467,6 @@ function AppearanceSection({ p, set }: { p: Preferences; set: (x: object) => voi
         </Row>
       </Group>
       <HdrGroup />
-      <Group title="Custom CSS" hint="Your own styles on top of Nova's, for this profile only. Clear it to undo.">
-        <div className="py-3">
-          <TextArea
-            key={p.ui.customCss}
-            defaultValue={p.ui.customCss}
-            onBlur={(e) => e.target.value !== p.ui.customCss && set({ ui: { customCss: e.target.value } })}
-            className="min-h-32 font-mono text-xs"
-            spellCheck={false}
-            placeholder={':root { --a1: #22d3ee; }\n.font-display { letter-spacing: 0; }'}
-          />
-        </div>
-      </Group>
       <Group title="Sections">
         <Row
           label="Music & free books"
@@ -599,14 +594,11 @@ function AssistantSection() {
 function AccountSection() {
   const qc = useQueryClient();
   const { data: appConfig } = useAppConfig();
-  const tokens = useQuery({ queryKey: ['tokens'], queryFn: api.me.tokens });
   const shares = useQuery({ queryKey: ['shares'], queryFn: api.shares.list });
-  const pairings = useQuery({ queryKey: ['engine-pairings'], queryFn: api.system.pairings, enabled: appConfig?.mode === 'desktop' });
-  const [name, setName] = useState('');
-  const [fresh, setFresh] = useState<string | null>(null);
+  const pairings = useQuery({ queryKey: ['engine-pairings'], queryFn: api.system.pairings, enabled: appConfig?.mode === 'desktop' && appConfig.platform !== 'android' });
   return (
     <>
-      {appConfig?.mode === 'desktop' && (
+      {appConfig?.mode === 'desktop' && appConfig.platform !== 'android' && (
         <Group title="Websites streaming through this computer" hint="A Nova website whose server leaves torrents to its viewers can use this app to stream. You approved these.">
           {!pairings.data?.length && <p className="py-3 text-sm text-muted">None yet.</p>}
           {pairings.data?.map((p) => (
@@ -648,6 +640,24 @@ function AccountSection() {
           </Row>
         ))}
       </Group>
+      <Group title="Your data">
+        <Row label="Export this profile" hint="Watch history, lists, collections, reading progress and notes as JSON.">
+          <a href={api.me.exportUrl()} download>
+            <Button size="sm">Download</Button>
+          </a>
+        </Row>
+      </Group>
+    </>
+  );
+}
+
+/** Advanced: tokens for the plugin CLI and other tools. */
+function ApiTokensGroup() {
+  const qc = useQueryClient();
+  const tokens = useQuery({ queryKey: ['tokens'], queryFn: api.me.tokens });
+  const [name, setName] = useState('');
+  const [fresh, setFresh] = useState<string | null>(null);
+  return (
       <Group title="API tokens" hint={<>For the <code>nova-plugin</code> CLI and other tools. A token can do what you can.</>}>
         {tokens.data?.map((t) => (
           <Row key={t.id} label={t.name} hint={`Created ${relTime(t.createdAt)}${t.lastUsedAt ? ` · used ${relTime(t.lastUsedAt)}` : ''}`}>
@@ -699,13 +709,37 @@ function AccountSection() {
           </Button>
         </div>
       </Group>
-      <Group title="Your data">
-        <Row label="Export this profile" hint="Watch history, lists, collections, reading progress and notes as JSON.">
-          <a href={api.me.exportUrl()} download>
-            <Button size="sm">Download</Button>
-          </a>
-        </Row>
-      </Group>
+  );
+}
+
+/** Your own styles on top of Nova's. */
+function CustomCssGroup({ p, set }: { p: Preferences; set: (x: object) => void }) {
+  return (
+    <Group title="Custom CSS" hint="Your own styles on top of Nova's, for this profile only. Clear it to undo.">
+      <div className="py-3">
+        <TextArea
+          key={p.ui.customCss}
+          defaultValue={p.ui.customCss}
+          onBlur={(e) => e.target.value !== p.ui.customCss && set({ ui: { customCss: e.target.value } })}
+          className="min-h-32 font-mono text-xs"
+          spellCheck={false}
+          placeholder={':root { --a1: #22d3ee; }\n.font-display { letter-spacing: 0; }'}
+        />
+      </div>
+    </Group>
+  );
+}
+
+/** Settings → Advanced: fine-tuning most people never need. */
+function AdvancedSection({ p, set }: { p: Preferences; set: (x: object) => void }) {
+  return (
+    <>
+      <p className="mb-5 text-sm text-muted">Fine-tuning for those who like it. Nova's defaults work well without any of this.</p>
+      <SourcesGroups p={p} set={set} />
+      <CompatibilityGroup p={p} set={set} />
+      <CustomCssGroup p={p} set={set} />
+      <ApiTokensGroup />
+      <BetaSection p={p} set={set} />
     </>
   );
 }
@@ -779,7 +813,7 @@ function TrackingSection({ p, set }: { p?: Preferences; set: (x: object) => void
                 </a>{' '}
                 with redirect URL <code className="rounded bg-white/8 px-1">https://anilist.co/api/v2/oauth/pin</code>, open{' '}
                 <code className="rounded bg-white/8 px-1 break-all">https://anilist.co/api/v2/oauth/authorize?client_id=YOUR_ID&amp;response_type=token</code>, approve, and paste the token
-                it shows here. (A server admin can add the client ID once under Server → Overview → Integrations to make this one click.)
+                it shows here. (A server admin can add the client ID once under Server → Advanced → Integrations to make this one click.)
               </p>
             )}
             <div className="flex gap-2">
@@ -811,7 +845,7 @@ function TrackingSection({ p, set }: { p?: Preferences; set: (x: object) => void
             </Button>
           </Row>
         ) : (
-          <p className="py-3 text-sm text-muted">A server admin can turn on MyAnimeList under Server → Overview → Integrations.</p>
+          <p className="py-3 text-sm text-muted">A server admin can turn on MyAnimeList under Server → Advanced → Integrations.</p>
         )}
       </Group>
       {p && (s.anilist.connected || s.mal.connected) && (
@@ -834,6 +868,11 @@ function UpdateRow() {
   const [fresh, setFresh] = useState(false);
   const release = useQuery({ queryKey: ['app-update', fresh], queryFn: () => api.system.update(fresh), staleTime: 30 * 60_000 });
   const u = info?.update;
+  // A release the updater hasn't picked up yet: have it start downloading now.
+  const behind = Boolean(release.data?.available && u?.supported && info?.settings.autoUpdate && (u.status === 'idle' || u.status === 'none'));
+  useEffect(() => {
+    if (behind) void desktop?.checkForUpdates();
+  }, [behind]);
   if (u?.supported && u.status !== 'idle' && u.status !== 'none') {
     return (
       <Row
@@ -855,16 +894,19 @@ function UpdateRow() {
     );
   }
   const r = release.data;
+  const selfUpdating = Boolean(u?.supported && info?.settings.autoUpdate);
   return (
     <Row
       label={r?.available ? `Nova ${r.latest!.version} is out` : release.isFetching ? 'Checking for updates…' : r?.latest ? "You're up to date" : 'Updates'}
       hint={
         r?.available
-          ? desktop
-            ? 'Download it from the release page and install it over this one; your data stays.'
-            : session?.account.isAdmin
-              ? 'Pull the new image and restart the container; your data stays.'
-              : 'Your server admin can update Nova.'
+          ? selfUpdating
+            ? 'Nova downloads it in the background and installs it the next time you close Nova.'
+            : desktop
+              ? 'Download it from the release page and install it over this one; your data stays.'
+              : session?.account.isAdmin
+                ? 'Pull the new image and restart the container; your data stays.'
+                : 'Your server admin can update Nova.'
           : r?.latest
             ? `Latest release: ${r.latest.version}`
             : 'Nova can check its project page for new releases.'
@@ -872,8 +914,8 @@ function UpdateRow() {
     >
       {r?.available ? (
         <a href={r.latest!.url} target="_blank" rel="noreferrer">
-          <Button size="sm" variant="white">
-            {desktop ? 'Download' : "What's new"}
+          <Button size="sm" variant={selfUpdating ? 'ghost' : 'white'}>
+            {desktop && !selfUpdating ? 'Download' : "What's new"}
           </Button>
         </a>
       ) : (
@@ -911,7 +953,7 @@ function AboutSection({ p, set }: { p?: Preferences; set: (x: object) => void })
     <>
       <Group title="About Nova" hint="Nova is open source. Found a bug or missing something? Let us know.">
         <Row label="Version">{cfg.version}</Row>
-        <Row label="Running as">{cfg.mode === 'desktop' ? (PLATFORM_NAME[desktop?.platform ?? ''] ?? 'Desktop app') : androidApp ? 'Android app' : 'Server'}</Row>
+        <Row label="Running as">{cfg.platform === 'android' ? 'Android app (Nova runs on this phone)' : cfg.mode === 'desktop' ? (PLATFORM_NAME[desktop?.platform ?? ''] ?? 'Desktop app') : androidApp ? 'Android app' : 'Server'}</Row>
         {androidApp && (
           <Row label="Server" hint={location.host}>
             <Button size="sm" onClick={switchServer}>
@@ -958,39 +1000,71 @@ export default function Settings() {
   const { data: prefs } = usePrefs();
   const save = useSavePrefs();
   const set = (x: object) => save.mutate(x);
-  const active = SECTIONS.find((s) => s.id === (section === 'home' ? 'customize' : section)) ?? SECTIONS[0]!;
+  const [query, setQuery] = useState('');
+  const q = query.trim();
+  const active = SECTIONS.find((s) => s.id === (MOVED[section] ?? section)) ?? SECTIONS[0]!;
+  const render = (id: string) => (
+    <>
+      {id === '' && <ProfileSection />}
+      {id === 'account' && <AccountSection />}
+      {id === 'about' && <AboutSection p={prefs} set={set} />}
+      {id === 'tracking' && <TrackingSection p={prefs} set={set} />}
+      {id === 'assistant' && <AssistantSection />}
+      {prefs && id === 'playback' && <PlaybackSection p={prefs} set={set} />}
+      {prefs && id === 'subtitles' && <SubtitlesSection p={prefs} set={set} />}
+      {prefs && id === 'reading' && <ReadingSection p={prefs} set={set} />}
+      {prefs && id === 'customize' && <CustomizeSection p={prefs} set={set} />}
+      {prefs && id === 'appearance' && <AppearanceSection p={prefs} set={set} />}
+      {prefs && id === 'advanced' && <AdvancedSection p={prefs} set={set} />}
+    </>
+  );
 
   return (
     <div className="px-5 pt-24 sm:px-10 sm:pt-28">
       <h1 className="font-display text-4xl font-bold sm:text-6xl">Settings</h1>
       <div className="mt-8 grid gap-8 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <nav className="scrollbar-none -mx-5 flex gap-1 overflow-x-auto px-5 lg:mx-0 lg:flex-col lg:px-0">
-          {SECTIONS.map((s) => (
-            <NavLink key={s.id} to={`/settings${s.id ? `/${s.id}` : ''}`} end className="relative flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium">
-              {({ isActive }) => (
-                <>
-                  {isActive && <motion.span layoutId="settings-nav" className="absolute inset-0 rounded-xl bg-white/10" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
-                  <s.icon className={cls('relative size-4', isActive ? 'text-accent' : 'text-faint')} />
-                  <span className={cls('relative', isActive ? 'text-fg' : 'text-muted')}>{s.label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-        <motion.div key={active.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl pb-10">
-          {active.id === '' && <ProfileSection />}
-          {active.id === 'account' && <AccountSection />}
-          {active.id === 'about' && <AboutSection p={prefs} set={set} />}
-          {active.id === 'tracking' && <TrackingSection p={prefs} set={set} />}
-          {active.id === 'assistant' && <AssistantSection />}
-          {prefs && active.id === 'playback' && <PlaybackSection p={prefs} set={set} />}
-          {prefs && active.id === 'subtitles' && <SubtitlesSection p={prefs} set={set} />}
-          {prefs && active.id === 'sources' && <SourcesSection p={prefs} set={set} />}
-          {prefs && active.id === 'reading' && <ReadingSection p={prefs} set={set} />}
-          {prefs && active.id === 'customize' && <CustomizeSection p={prefs} set={set} />}
-          {prefs && active.id === 'beta' && <BetaSection p={prefs} set={set} />}
-          {prefs && active.id === 'appearance' && <AppearanceSection p={prefs} set={set} />}
-        </motion.div>
+        <div className="space-y-4">
+          <SettingsSearch value={query} onChange={setQuery} placeholder="Search settings" />
+          <nav className={cls('scrollbar-none -mx-5 flex gap-1 overflow-x-auto px-5 lg:mx-0 lg:flex-col lg:px-0', q && 'opacity-50')}>
+            {SECTIONS.map((s, i) => (
+              <Fragment key={s.id}>
+                {s.group !== SECTIONS[i - 1]?.group && <div className="hidden px-3 pt-3 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase first:pt-0 lg:block">{s.group}</div>}
+                <NavLink to={`/settings${s.id ? `/${s.id}` : ''}`} end onClick={() => setQuery('')} className="relative flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium">
+                  {({ isActive }) => (
+                    <>
+                      {isActive && !q && <motion.span layoutId="settings-nav" className="absolute inset-0 rounded-xl bg-white/10" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
+                      <s.icon className={cls('relative size-4', isActive && !q ? 'text-accent' : 'text-faint')} />
+                      <span className={cls('relative', isActive && !q ? 'text-fg' : 'text-muted')}>{s.label}</span>
+                    </>
+                  )}
+                </NavLink>
+              </Fragment>
+            ))}
+          </nav>
+        </div>
+        {q ? (
+          // Every page at once, each showing only what matches.
+          <div data-searching="" className="max-w-3xl space-y-8 pb-10">
+            {SECTIONS.map((s) => {
+              const all = fuzzyMatch(s.label, q);
+              return (
+                <section key={s.id} data-section="" data-all={all ? '' : undefined}>
+                  <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-muted">
+                    <s.icon className="size-4 text-faint" /> {s.label}
+                  </h2>
+                  <SettingsFilter.Provider value={{ q, all, context: s.label }}>{render(s.id)}</SettingsFilter.Provider>
+                </section>
+              );
+            })}
+            <p data-search-empty="" className="text-sm text-muted">
+              Nothing matches “{q}”.
+            </p>
+          </div>
+        ) : (
+          <motion.div key={active.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-3xl pb-10">
+            {render(active.id)}
+          </motion.div>
+        )}
       </div>
     </div>
   );

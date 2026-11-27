@@ -85,6 +85,8 @@ export const DEFAULT_PREFERENCES = {
     externalPlayer: '', // '' | vlc | mpv | iina
     skipIntroAutomatically: false,
     skipCreditsAutomatically: false,
+    // Without intro/credits data for an episode, Skip jumps this many seconds (0 hides it then).
+    skipFallbackSeconds: 85,
     accent: 'nova', // nova | ember | ocean | aurora | mono
     // Admins (and the desktop app) hear about new Nova releases.
     updateNotices: true,

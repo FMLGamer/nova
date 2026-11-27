@@ -23,6 +23,13 @@ export function useDragScroll(ref: RefObject<HTMLElement | null>) {
       el.style.scrollSnapType = '';
       el.style.removeProperty('scroll-behavior');
     };
+    // Where a glide stops is where the row stays (snapping to a card would jerk it), unless that's just short of an end.
+    const settle = () => {
+      const max = el.scrollWidth - el.clientWidth;
+      const edge = Math.min(80, el.clientWidth * 0.15);
+      if (el.scrollLeft > 0 && el.scrollLeft < edge) el.scrollTo({ left: 0, behavior: 'smooth' });
+      else if (el.scrollLeft < max && el.scrollLeft > max - edge) el.scrollTo({ left: max, behavior: 'smooth' });
+    };
 
     const onMove = (e: PointerEvent) => {
       if (!pressed) return;
@@ -61,7 +68,10 @@ export function useDragScroll(ref: RefObject<HTMLElement | null>) {
         el.scrollLeft += v * dt;
         v *= Math.pow(0.94, dt / 16);
         if (Math.abs(v) > 0.05) raf = requestAnimationFrame(glide);
-        else restoreSnap();
+        else {
+          el.style.removeProperty('scroll-behavior');
+          settle();
+        }
       };
       raf = requestAnimationFrame(glide);
     };
@@ -70,7 +80,6 @@ export function useDragScroll(ref: RefObject<HTMLElement | null>) {
       if (e.pointerType !== 'mouse' || e.button !== 0) return;
       if ((e.target as HTMLElement).closest('input, textarea, select, [data-no-drag]')) return;
       stopMomentum();
-      restoreSnap();
       pressed = true;
       moved = false;
       startX = lastX = e.clientX;
@@ -89,15 +98,19 @@ export function useDragScroll(ref: RefObject<HTMLElement | null>) {
     };
     // Links and images would otherwise start the browser's own drag.
     const onDragStart = (e: DragEvent) => e.preventDefault();
+    // Fingers scroll natively and like the cards snapping into place.
+    const onTouch = () => restoreSnap();
 
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('click', onClick, true);
     el.addEventListener('dragstart', onDragStart);
+    el.addEventListener('touchstart', onTouch, { passive: true });
     return () => {
       stopMomentum();
       el.removeEventListener('pointerdown', onDown);
       el.removeEventListener('click', onClick, true);
       el.removeEventListener('dragstart', onDragStart);
+      el.removeEventListener('touchstart', onTouch);
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
     };

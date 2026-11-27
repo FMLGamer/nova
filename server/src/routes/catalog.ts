@@ -6,6 +6,7 @@ import { detailFor, episodesFor, homeRows, searchAll } from '../services/catalog
 import { tmdbBrowse, tmdbFindByImdb, tmdbGenres } from '../services/tmdb.js';
 import { ANIME_GENRES, anilistBrowse, anilistRecent, anilistRows, anilistSchedule } from '../services/anilist.js';
 import { getSkipTimes } from '../services/aniskip.js';
+import { fillerMarks } from '../services/filler.js';
 import { downloadSubtitleVtt, searchSubtitles, subtitlesConfigured } from '../services/subtitles.js';
 import { activePlugins } from '../plugins/manager.js';
 import { pluginSubtitleVtt, pluginSubtitles } from '../plugins/subtitles.js';
@@ -167,10 +168,20 @@ catalogRouter.get(
   asyncHandler(async (req, res) => {
     const query = String(req.query.q ?? '').trim();
     if (!query) {
-      res.json({ movies: [], shows: [], anime: [] });
+      res.json({ top: [], movies: [], shows: [], anime: [] });
       return;
     }
     res.json(await searchAll(query));
+  }),
+);
+
+/** Filler and recap episodes of a long anime (by MyAnimeList id), as { episode: kind }. */
+catalogRouter.get(
+  '/filler/:malId',
+  asyncHandler(async (req, res) => {
+    const malId = Number(req.params.malId);
+    const marks = Number.isInteger(malId) && malId > 0 ? await fillerMarks(malId, 25_000) : null;
+    res.json({ marks: Object.fromEntries(marks ?? []) });
   }),
 );
 

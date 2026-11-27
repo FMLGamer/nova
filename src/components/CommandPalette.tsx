@@ -101,12 +101,8 @@ function Palette({ onClose }: { onClose: () => void }) {
     const ql = q.trim().toLowerCase();
     const s = search.data;
     if (s) {
-      const per = scope ? 10 : 4;
-      const all = [
-        ...(!scope || scope.id === 'movies' ? s.movies.slice(0, per) : []),
-        ...(!scope || scope.id === 'shows' ? s.shows.slice(0, per) : []),
-        ...(!scope || scope.id === 'anime' ? s.anime.slice(0, per) : []),
-      ];
+      // Everywhere: the best matches of every kind, best first. In a tab: that kind's own list.
+      const all = !scope ? (s.top ?? []).slice(0, 10) : (scope.id === 'movies' ? s.movies : scope.id === 'shows' ? s.shows : scope.id === 'anime' ? s.anime : []).slice(0, 10);
       for (const it of all) {
         out.push({
           id: it.id,
@@ -261,7 +257,9 @@ function Palette({ onClose }: { onClose: () => void }) {
                 >
                   {e.image !== undefined ? (
                     e.image ? (
-                      <img src={e.image} alt="" className="h-12 w-8 shrink-0 rounded-md object-cover" />
+                      <span className="h-12 w-8 shrink-0 overflow-hidden rounded-md bg-white/8">
+                        <img src={e.image} alt="" className="size-full object-cover" />
+                      </span>
                     ) : (
                       <span className="h-12 w-8 shrink-0 rounded-md bg-white/8" />
                     )

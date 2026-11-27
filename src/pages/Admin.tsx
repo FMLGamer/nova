@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'motion/react';
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
+import { Fragment, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { NavLink, useParams } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -24,6 +24,7 @@ import {
   ScrollText,
   Search,
   Shield,
+  SlidersHorizontal,
   Trash2,
   Users,
   X,
@@ -31,20 +32,22 @@ import {
 import { api } from '../lib/api';
 import { desktop, useDesktopInfo } from '../lib/desktop';
 import { cls, fmtBytes, relTime } from '../lib/format';
+import { fuzzyMatch } from '../lib/fuzzy';
 import { useAppConfig, useSession } from '../lib/queries';
 import { errorText, toast } from '../lib/store';
 import type { AccountSettings, ConfigField, DirectoryChannel, InstallPreview, LibraryItem, LibrarySource, PermissionSummary, PluginInfo } from '../lib/types';
-import { Badge, Button, Card, Chip, Empty, Input, Modal, Row, Segmented, Select, Spinner, Switch, TextArea } from '../components/ui';
+import { Badge, Button, Card, Chip, Empty, Input, Modal, Row, Segmented, Select, SettingsFilter, SettingsGroup, SettingsSearch, Spinner, Switch, TextArea } from '../components/ui';
 import { LiveVideo } from './Live';
 
 const SECTIONS = [
-  { id: '', label: 'Overview', icon: Activity },
-  { id: 'people', label: 'People', icon: Users },
-  { id: 'plugins', label: 'Plugins', icon: Plug },
-  { id: 'library', label: 'Library', icon: Library },
-  { id: 'downloads', label: 'Downloads', icon: Download },
-  { id: 'live', label: 'Live TV', icon: Radio },
-  { id: 'backups', label: 'Backups', icon: Archive },
+  { id: '', label: 'Overview', icon: Activity, group: 'Server', search: true },
+  { id: 'people', label: 'People', icon: Users, group: 'Server', search: true },
+  { id: 'library', label: 'Library', icon: Library, group: 'Content', search: true },
+  { id: 'downloads', label: 'Downloads', icon: Download, group: 'Content', search: true },
+  { id: 'live', label: 'Live TV', icon: Radio, group: 'Content', search: false },
+  { id: 'plugins', label: 'Plugins', icon: Plug, group: 'Content', search: false },
+  { id: 'backups', label: 'Backups', icon: Archive, group: 'Maintenance', search: true },
+  { id: 'advanced', label: 'Advanced', icon: SlidersHorizontal, group: 'Advanced', search: true },
 ];
 
 function useAct() {
@@ -101,9 +104,43 @@ function Overview() {
           <Row label="Live channels">{s.liveChannels}</Row>
           <Row label="Last backup">{s.backups[0] ? relTime(s.backups[0].createdAt) : 'None yet'}</Row>
           <Row label="Transcode slots">{data.limits.maxTranscodes}</Row>
-          <PortRow port={s.port} fromEnv={s.portFromEnv} />
         </div>
       </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- advanced
+function Advanced() {
+  const act = useAct();
+  const qc = useQueryClient();
+  const { data } = useQuery({ queryKey: ['admin-overview'], queryFn: api.admin.overview });
+  const options = useQuery({ queryKey: ['admin-options'], queryFn: api.admin.options });
+  return (
+    <div className="space-y-6">
+      <SettingsGroup title="Downloads">
+        <Row
+          label="Offer downloading to the server"
+          hint="Adds “Download to server” and server auto-download next to downloading to a device, for people allowed server downloads (People). Off, Nova only downloads to devices."
+        >
+          <Switch
+            checked={Boolean(options.data?.serverDownloads)}
+            disabled={!options.data}
+            onChange={(v) =>
+              act(async () => {
+                await api.admin.saveOptions({ serverDownloads: v });
+                await qc.invalidateQueries({ queryKey: ['admin-options'] });
+                await qc.invalidateQueries({ queryKey: ['session'] });
+              })
+            }
+          />
+        </Row>
+      </SettingsGroup>
+      {data && (
+        <SettingsGroup title="Network">
+          <PortRow port={data.server.port} fromEnv={data.server.portFromEnv} />
+        </SettingsGroup>
+      )}
       <Integrations />
     </div>
   );
@@ -1205,36 +1242,71 @@ function Backups() {
 export default function Admin() {
   const { section = '' } = useParams();
   const { data: session } = useSession();
+  const [query, setQuery] = useState('');
   if (!session?.account.isAdmin) return <Empty icon={<Shield />} title="Admins only" />;
+  const q = query.trim();
   const active = SECTIONS.find((s) => s.id === section) ?? SECTIONS[0]!;
+  const render = (id: string) => (
+    <>
+      {id === '' && <Overview />}
+      {id === 'people' && <People />}
+      {id === 'plugins' && <Plugins />}
+      {id === 'library' && <LibraryAdmin />}
+      {id === 'downloads' && <DownloadsAdmin />}
+      {id === 'live' && <LiveAdmin />}
+      {id === 'backups' && <Backups />}
+      {id === 'advanced' && <Advanced />}
+    </>
+  );
   return (
     <div className="px-5 pt-24 sm:px-10 sm:pt-28">
       <h1 className="flex items-center gap-3 font-display text-4xl font-bold sm:text-6xl">
         Server <Cpu className="size-8 text-faint sm:size-10" />
       </h1>
       <div className="mt-8 grid gap-8 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <nav className="scrollbar-none -mx-5 flex gap-1 overflow-x-auto px-5 lg:mx-0 lg:flex-col lg:px-0">
-          {SECTIONS.map((s) => (
-            <NavLink key={s.id} to={`/admin${s.id ? `/${s.id}` : ''}`} end className="relative flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium">
-              {({ isActive }) => (
-                <>
-                  {isActive && <motion.span layoutId="admin-nav" className="absolute inset-0 rounded-xl bg-white/10" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
-                  <s.icon className={cls('relative size-4', isActive ? 'text-accent' : 'text-faint')} />
-                  <span className={cls('relative', isActive ? 'text-fg' : 'text-muted')}>{s.label}</span>
-                </>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-        <motion.div key={active.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl pb-10">
-          {active.id === '' && <Overview />}
-          {active.id === 'people' && <People />}
-          {active.id === 'plugins' && <Plugins />}
-          {active.id === 'library' && <LibraryAdmin />}
-          {active.id === 'downloads' && <DownloadsAdmin />}
-          {active.id === 'live' && <LiveAdmin />}
-          {active.id === 'backups' && <Backups />}
-        </motion.div>
+        <div className="space-y-4">
+          <SettingsSearch value={query} onChange={setQuery} placeholder="Search server settings" />
+          <nav className={cls('scrollbar-none -mx-5 flex gap-1 overflow-x-auto px-5 lg:mx-0 lg:flex-col lg:px-0', q && 'opacity-50')}>
+            {SECTIONS.map((s, i) => (
+              <Fragment key={s.id}>
+                {s.group !== SECTIONS[i - 1]?.group && <div className="hidden px-3 pt-3 pb-1 text-[11px] font-semibold tracking-wider text-faint uppercase first:pt-0 lg:block">{s.group}</div>}
+                <NavLink to={`/admin${s.id ? `/${s.id}` : ''}`} end onClick={() => setQuery('')} className="relative flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium">
+                  {({ isActive }) => (
+                    <>
+                      {isActive && !q && <motion.span layoutId="admin-nav" className="absolute inset-0 rounded-xl bg-white/10" transition={{ type: 'spring', stiffness: 500, damping: 40 }} />}
+                      <s.icon className={cls('relative size-4', isActive && !q ? 'text-accent' : 'text-faint')} />
+                      <span className={cls('relative', isActive && !q ? 'text-fg' : 'text-muted')}>{s.label}</span>
+                    </>
+                  )}
+                </NavLink>
+              </Fragment>
+            ))}
+          </nav>
+        </div>
+        {q ? (
+          <div data-searching="" className="max-w-4xl space-y-8 pb-10">
+            {SECTIONS.map((s) => {
+              const all = fuzzyMatch(s.label, q);
+              // Lists (plugins, channels) only come along when their page is what you searched for.
+              if (!all && !s.search) return null;
+              return (
+                <section key={s.id} data-section="" data-all={all ? '' : undefined}>
+                  <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-muted">
+                    <s.icon className="size-4 text-faint" /> {s.label}
+                  </h2>
+                  <SettingsFilter.Provider value={{ q, all, context: s.label }}>{render(s.id)}</SettingsFilter.Provider>
+                </section>
+              );
+            })}
+            <p data-search-empty="" className="text-sm text-muted">
+              Nothing matches “{q}”.
+            </p>
+          </div>
+        ) : (
+          <motion.div key={active.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="max-w-4xl pb-10">
+            {render(active.id)}
+          </motion.div>
+        )}
       </div>
     </div>
   );

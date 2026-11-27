@@ -14,6 +14,7 @@ import { lastScan, libraryEnabled, storageStats } from '../library/library.js';
 import { listPlugins } from '../plugins/manager.js';
 import { sandboxAvailable } from '../plugins/worker.js';
 import { INTEGRATION_KEYS, integrationStatus, setIntegration } from '../services/integrations.js';
+import { serverOptions, setServerOptions } from '../services/serverOptions.js';
 import { VERSION } from './system.js';
 
 export const adminRouter = Router();
@@ -27,6 +28,14 @@ adminRouter.put('/integrations', (req, res) => {
   const body = parse(z.object(Object.fromEntries(INTEGRATION_KEYS.map((k) => [k, z.string().max(500).optional()]))), req.body) as Partial<Record<(typeof INTEGRATION_KEYS)[number], string>>;
   for (const k of INTEGRATION_KEYS) if (body[k] !== undefined) setIntegration(k, body[k]!);
   res.json({ integrations: integrationStatus() });
+});
+
+adminRouter.get('/options', (_req, res) => {
+  res.json({ options: serverOptions() });
+});
+
+adminRouter.put('/options', (req, res) => {
+  res.json({ options: setServerOptions(parse(z.object({ serverDownloads: z.boolean().optional() }), req.body)) });
 });
 
 adminRouter.get(

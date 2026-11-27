@@ -15,6 +15,7 @@ import {
 } from '../services/accounts.js';
 import { createProfile, listProfiles, profileToDTO } from '../services/profiles.js';
 import { getAccountSettings } from '../services/entitlements.js';
+import { serverOptions } from '../services/serverOptions.js';
 import { rateLimit } from '../lib/rateLimit.js';
 import type { AccountRow, ProfileRow } from '../types.js';
 
@@ -67,6 +68,7 @@ function sessionPayload(account: AccountRow, profiles: ProfileRow[]) {
     account: accountToDTO(account),
     profiles: profiles.map(profileToDTO),
     settings: getAccountSettings(account.id, account.is_admin === 1),
+    server: { serverDownloads: serverOptions().serverDownloads },
   };
 }
 

@@ -505,7 +505,14 @@ export function Player(p: PlayerProps) {
   const ed = skip.data?.ed ?? chapterSkip.ed;
   const inOp = op && time >= op.start && time < op.end - 1;
   const inEd = ed && time >= ed.start && time < ed.end - 1;
-  const skipVisible = (inOp && (time < op!.start + 5 || chrome)) || (inEd && !p.next && (time < ed!.start + 5 || chrome));
+  // Nothing known about this episode's intro or credits: Skip jumps a fixed stretch, offered where they usually are.
+  const jump = prefs?.ui.skipFallbackSeconds ?? 85;
+  const guessing = jump > 0 && p.mediaType !== 'movie' && p.episode != null && !skip.isLoading && duration > 300;
+  const guessOp = guessing && !op && time > 1 && time < 360;
+  const guessEd = guessing && !ed && duration - time < 360 && duration - time > 40;
+  const skipTarget = inOp ? op!.end + 0.2 : inEd ? ed!.end + 0.2 : Math.min(duration - 1, time + jump);
+  const skipLabel = inOp || guessOp ? 'Skip intro' : 'Skip credits';
+  const skipVisible = (inOp && (time < op!.start + 5 || chrome)) || (inEd && !p.next && (time < ed!.start + 5 || chrome)) || ((guessOp || guessEd) && chrome);
   const autoSkipped = useRef<string | null>(null);
   useEffect(() => {
     if (inOp && prefs?.ui.skipIntroAutomatically && autoSkipped.current !== `op:${p.itemKey}`) {
@@ -786,7 +793,7 @@ export function Player(p: PlayerProps) {
           if (p.next) p.onNext();
           break;
         case 'skip':
-          if (inOp || inEd) seekTo((inOp ? op!.end : ed!.end) + 0.2);
+          if (inOp || inEd || guessOp || guessEd) seekTo(skipTarget);
           break;
         case 'pip':
           void togglePip();
@@ -1133,10 +1140,11 @@ export function Player(p: PlayerProps) {
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: 20 }}
-            onClick={() => seekTo((inOp ? op!.end : ed!.end) + 0.2)}
+            onClick={() => seekTo(skipTarget)}
             className="absolute right-6 bottom-28 z-30 flex items-center gap-2 rounded-xl bg-white px-5 py-3 font-semibold text-black shadow-2xl transition-transform hover:scale-105 sm:right-10"
           >
-            <SkipForward className="size-5 fill-current" /> {inOp ? 'Skip intro' : 'Skip credits'}
+            <SkipForward className="size-5 fill-current" /> {skipLabel}
+            {!inOp && !inEd && <span className="text-sm font-medium text-black/55">{jump} s</span>}
           </motion.button>
         )}
       </AnimatePresence>
@@ -1620,7 +1628,7 @@ export function Player(p: PlayerProps) {
               <Option
                 onClick={() => {
                   if (saveJob) return offline.cancel(p.itemKey);
-                  if (savedOffline) return toast('Already saved on this device');
+                  if (savedOffline) return toast('Already downloaded on this device');
                   void offline.save(
                     {
                       itemKey: p.itemKey,
@@ -1637,11 +1645,11 @@ export function Player(p: PlayerProps) {
                     playable.name,
                     playable.mime,
                   );
-                  toast('Saving to this device in the background');
+                  toast('Downloading to this device in the background');
                 }}
-                hint={saveJob ? `${Math.round(saveJob.progress * 100)}%` : savedOffline ? 'Saved' : <Download className="size-4" />}
+                hint={saveJob ? `${Math.round(saveJob.progress * 100)}%` : savedOffline ? 'Downloaded' : <Download className="size-4" />}
               >
-                {saveJob ? 'Cancel saving' : 'Save on this device'}
+                {saveJob ? 'Cancel download' : 'Download to this device'}
               </Option>
             )}
             {!isOffline && (

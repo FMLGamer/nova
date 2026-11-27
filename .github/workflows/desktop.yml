@@ -4,9 +4,15 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      android-only:
+        description: Only build and test Nova for Android
+        type: boolean
+        default: false
 
 jobs:
   build:
+    if: ${{ !inputs.android-only }}
     strategy:
       fail-fast: false
       matrix:
@@ -54,7 +60,8 @@ jobs:
             desktop/release/latest*.yml
           if-no-files-found: error
 
-  # Nova for Android: the web shell in mobile/ (it opens the user's own Nova server), as a signed APK.
+  # Nova for Android: the web shell in mobile/ (it opens a Nova server), plus Node.js and the Nova server so it can
+  # also run Nova on the phone itself, as a signed APK.
   android:
     runs-on: ubuntu-latest
     steps:
@@ -70,7 +77,18 @@ jobs:
           java-version: 21
 
       - name: Install
-        run: npm --prefix mobile ci
+        run: |
+          npm ci
+          npm --prefix server ci
+          npm --prefix mobile ci
+
+      - name: Build the web app and the server
+        run: |
+          npm run build
+          npm --prefix server run build
+
+      - name: Bundle the server and Node.js for the phone
+        run: node mobile/scripts/bundle-android.mjs arm64-v8a
 
       - name: Copy the shell into the Android project
         working-directory: mobile
@@ -104,6 +122,51 @@ jobs:
           name: nova-android
           path: release-android/Nova-*.apk
           if-no-files-found: error
+
+  # The phone's own server, for real: an x86_64 test build in an emulator starts it, and the test talks to it.
+  android-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install
+        run: |
+          npm ci
+          npm --prefix server ci
+          npm --prefix mobile ci
+
+      - name: Build a test app
+        run: |
+          npm run build
+          npm --prefix server run build
+          node mobile/scripts/bundle-android.mjs x86_64
+          (cd mobile && npx cap sync android)
+          (cd mobile/android && chmod +x gradlew && ./gradlew --no-daemon assembleDebug)
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Start Nova in an emulator and use it
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: bash mobile/scripts/android-smoke.sh mobile/android/app/build/outputs/apk/debug/app-debug.apk
 
   release:
     # Attach whatever built, so one failing platform doesn't hold back the others.

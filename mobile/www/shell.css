@@ -90,6 +90,19 @@ button.secondary {
 .recent {
   margin-top: 32px;
 }
+.local {
+  margin-top: 32px;
+  display: grid;
+  gap: 10px;
+}
+.local h2 {
+  margin: 0;
+}
+.hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
 .recent ul {
   margin: 0;
   padding: 0;

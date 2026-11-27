@@ -68,8 +68,21 @@ interface Job {
   itemKey: string;
   title: string;
   progress: number;
-  phase: 'finding' | 'downloading';
+  phase: 'queued' | 'finding' | 'downloading';
   abort: AbortController;
+}
+
+/** Downloads run two at a time; the rest wait their turn (a whole season can be asked for at once). */
+const PARALLEL = 2;
+let running = 0;
+const turns: (() => void)[] = [];
+async function myTurn(): Promise<void> {
+  if (running >= PARALLEL) await new Promise<void>((r) => turns.push(r));
+  running++;
+}
+function nextTurn(): void {
+  running--;
+  turns.shift()?.();
 }
 
 interface OfflineState {
@@ -98,7 +111,17 @@ export const useOffline = create<OfflineState>((set, get) => ({
     await writeManifest(list);
     set({ entries: list });
   },
-  cancel: (itemKey) => get().jobs[itemKey]?.abort.abort(),
+  cancel: (itemKey) => {
+    const job = get().jobs[itemKey];
+    job?.abort.abort();
+    // One still waiting for its turn just leaves the queue.
+    if (job?.phase === 'queued')
+      set((s) => {
+        const jobs = { ...s.jobs };
+        delete jobs[itemKey];
+        return { jobs };
+      });
+  },
   save: async (meta, streamPath, fileName, mime) => {
     if (!offlineSupported()) throw new Error('This browser cannot keep offline copies');
     const abort = get().jobs[meta.itemKey]?.abort ?? new AbortController();
@@ -133,7 +156,7 @@ export const useOffline = create<OfflineState>((set, get) => ({
       const list = [...(await readManifest()).filter((e) => e.itemKey !== meta.itemKey), entry];
       await writeManifest(list);
       set({ entries: list });
-      toast(`${meta.title} is ready offline`, 'ok');
+      toast(`${meta.subtitle ? `${meta.title} · ${meta.subtitle}` : meta.title} is downloaded`, 'ok');
     } catch (e) {
       await w.abort().catch(() => undefined);
       await dir.removeEntry(safe(meta.itemKey)).catch(() => undefined);
@@ -147,22 +170,29 @@ export const useOffline = create<OfflineState>((set, get) => ({
     }
   },
   saveBest: async (meta) => {
+    if (get().jobs[meta.itemKey] || get().entries.some((e) => e.itemKey === meta.itemKey)) return;
     const abort = new AbortController();
-    set((s) => ({ jobs: { ...s.jobs, [meta.itemKey]: { itemKey: meta.itemKey, title: meta.title, progress: 0, phase: 'finding', abort } } }));
+    set((s) => ({ jobs: { ...s.jobs, [meta.itemKey]: { itemKey: meta.itemKey, title: meta.title, progress: 0, phase: 'queued', abort } } }));
+    await myTurn();
     try {
+      if (abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
+      set((s) => (s.jobs[meta.itemKey] ? { jobs: { ...s.jobs, [meta.itemKey]: { ...s.jobs[meta.itemKey]!, phase: 'finding' } } } : s));
       const search = await api.play.sourcesSync({ mediaId: meta.mediaId, season: meta.season ?? undefined, episode: meta.episode ?? undefined });
       const best = search.releases[0];
-      if (!best) throw new Error('No source found to save');
+      if (!best) throw new Error(`No source found for ${meta.subtitle ?? meta.title}`);
       const { source } = await api.play.prepare({ releaseId: best.id, itemKey: meta.itemKey, title: meta.title });
       if (abort.signal.aborted) throw new DOMException('aborted', 'AbortError');
       await get().save({ ...meta, kind: 'video' }, source.path, source.name, source.mime);
     } catch (e) {
       set((s) => {
+        if (s.jobs[meta.itemKey]?.abort !== abort) return s;
         const jobs = { ...s.jobs };
         delete jobs[meta.itemKey];
         return { jobs };
       });
       if (!abort.signal.aborted) toast(errorText(e), 'bad');
+    } finally {
+      nextTurn();
     }
   },
 }));

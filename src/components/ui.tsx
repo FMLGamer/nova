@@ -1,6 +1,9 @@
 import { AnimatePresence, motion } from 'motion/react';
 import {
+  createContext,
   forwardRef,
+  isValidElement,
+  useContext,
   useEffect,
   useId,
   useRef,
@@ -12,8 +15,9 @@ import {
   type TextareaHTMLAttributes,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { Check, Loader2, X } from 'lucide-react';
+import { Check, Loader2, Search as SearchIcon, X } from 'lucide-react';
 import { cls } from '../lib/format';
+import { fuzzyMatch } from '../lib/fuzzy';
 import { useToasts } from '../lib/store';
 
 // ---------------------------------------------------------------- buttons
@@ -234,10 +238,29 @@ export function Slider({
   );
 }
 
+/**
+ * Settings search. Inside a provider with a query, rows that don't match render nothing and matching ones
+ * are marked, so CSS can hide groups and pages without a match. `all` keeps every row (its group or page matched);
+ * `context` is the page and group names, so "subtitle size" finds Size under Subtitles.
+ */
+export const SettingsFilter = createContext<{ q: string; all?: boolean; context?: string } | null>(null);
+
+/** The readable text of a label or hint, for searching. */
+export function textOf(node: ReactNode): string {
+  if (node == null || typeof node === 'boolean') return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join(' ');
+  if (isValidElement(node)) return textOf((node.props as { children?: ReactNode }).children);
+  return '';
+}
+
 /** One settings line: label + hint on the left, control on the right. */
 export function Row({ label, hint, children, stack }: { label: ReactNode; hint?: ReactNode; children: ReactNode; stack?: boolean }) {
+  const filter = useContext(SettingsFilter);
+  const searching = Boolean(filter?.q);
+  if (searching && !filter!.all && !fuzzyMatch(`${filter!.context ?? ''} ${textOf(label)} ${textOf(hint)}`, filter!.q)) return null;
   return (
-    <div className={cls('flex gap-4 py-3.5', stack ? 'flex-col' : 'items-center justify-between')}>
+    <div data-hit={searching ? '' : undefined} className={cls('flex gap-4 py-3.5', stack ? 'flex-col' : 'items-center justify-between')}>
       <div className="min-w-0">
         <div className="text-sm font-medium text-fg">{label}</div>
         {hint && <div className="mt-0.5 text-[13px] leading-snug text-faint">{hint}</div>}
@@ -247,8 +270,46 @@ export function Row({ label, hint, children, stack }: { label: ReactNode; hint?:
   );
 }
 
-export function Card({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cls('rounded-3xl border border-line bg-white/[0.025] p-5 sm:p-6', className)}>{children}</div>;
+export function Card({ children, className, hit }: { children: ReactNode; className?: string; hit?: boolean }) {
+  return (
+    <div data-group="" data-hit={hit ? '' : undefined} className={cls('rounded-3xl border border-line bg-white/[0.025] p-5 sm:p-6', className)}>
+      {children}
+    </div>
+  );
+}
+
+/** A titled card of settings rows. While searching, a matching title shows the whole group. */
+export function SettingsGroup({ title, children, hint }: { title: string; children: ReactNode; hint?: ReactNode }) {
+  const filter = useContext(SettingsFilter);
+  const titleHit = Boolean(filter?.q && !filter.all && fuzzyMatch(`${filter.context ?? ''} ${title}`, filter.q));
+  const inner = filter && (titleHit ? { ...filter, all: true } : { ...filter, context: `${filter.context ?? ''} ${title}` });
+  return (
+    <Card className="mb-5" hit={titleHit || Boolean(filter?.q && filter.all)}>
+      <h3 className="font-display text-lg font-semibold">{title}</h3>
+      {hint && <p className="mt-1 text-sm text-muted">{hint}</p>}
+      <SettingsFilter.Provider value={inner}>
+        <div className="mt-2 divide-y divide-line">{children}</div>
+      </SettingsFilter.Provider>
+    </Card>
+  );
+}
+
+/** The search box above a settings menu. */
+export function SettingsSearch({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <div className="relative">
+      <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-faint" />
+      <input
+        type="search"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onKeyDown={(e) => e.key === 'Escape' && onChange('')}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        className={cls(fieldBase, 'h-10 pl-9')}
+      />
+    </div>
+  );
 }
 
 export function Progress({ value, className }: { value: number; className?: string }) {
@@ -367,7 +428,7 @@ export function Menu({
             exit={{ opacity: 0, y: up ? 6 : -6, scale: 0.97 }}
             transition={{ duration: 0.16 }}
             className={cls(
-              'glass-strong absolute z-[90] overflow-hidden rounded-2xl p-1.5 shadow-2xl',
+              'menu-surface absolute z-[90] overflow-hidden rounded-2xl p-1.5',
               width,
               align === 'right' ? 'right-0' : 'left-0',
               up ? 'bottom-full mb-2 origin-bottom' : 'top-full mt-2 origin-top',
@@ -400,13 +461,13 @@ export function MenuItem({
     <button
       onClick={onClick}
       className={cls(
-        'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/8',
-        danger ? 'text-bad' : 'text-fg',
+        'flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors hover:bg-white/10 focus-visible:bg-white/10',
+        danger ? 'text-bad' : active ? 'font-medium text-fg' : 'text-fg/90 hover:text-fg',
       )}
     >
       {icon && <span className="grid size-5 shrink-0 place-items-center text-muted [&>svg]:size-[18px]">{icon}</span>}
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {hint && <span className="text-xs text-faint">{hint}</span>}
+      {hint && <span className="text-xs text-muted">{hint}</span>}
       {active && <Check className="size-4 text-accent" />}
     </button>
   );

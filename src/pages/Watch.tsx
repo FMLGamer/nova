@@ -122,21 +122,27 @@ export default function Watch() {
     searchStarted.current = Date.now();
   }, [itemKey]);
 
+  const prepareSeq = useRef(0);
   const prepare = useCallback(
     async (fn: () => Promise<{ source: PlaySource; label: string | null; releaseId?: string }>) => {
+      const seq = ++prepareSeq.current;
       setPhase('preparing');
       setPicker(false);
       setPrepError(null);
       try {
         const { source, label, releaseId } = await fn();
+        if (seq !== prepareSeq.current) return;
         setCurrentRelease(releaseId ?? null);
         if (source.kind === 'c' && source.torrent) {
           const cfg = await qc.fetchQuery({ queryKey: ['app-config'], queryFn: api.system.config, staleTime: Infinity });
-          setPlayable(await clientPlayable(source, label, cfg.enginePort, itemKeyRef.current, titleRef.current));
+          const p = await clientPlayable(source, label, cfg.enginePort, itemKeyRef.current, titleRef.current);
+          if (seq !== prepareSeq.current) return;
+          setPlayable(p);
         } else setPlayable(toPlayable(source, label));
         setPhase('play');
         sourceLinkRef.current = source.link || null;
       } catch (e) {
+        if (seq !== prepareSeq.current) return;
         setPrepError(errorText(e));
         setPhase('pick');
         setPicker(true);
@@ -144,6 +150,12 @@ export default function Watch() {
     },
     [],
   );
+  // Leave a preparation that takes too long: whatever it brings back later is ignored.
+  const abandonPrepare = () => {
+    prepareSeq.current++;
+    setPhase('pick');
+    setPicker(true);
+  };
 
   const pickRelease = useCallback(
     (r: Release) =>
@@ -289,7 +301,8 @@ export default function Watch() {
     [itemKey, detail],
   );
 
-  const onServerDownload = session?.settings.downloadsEnabled
+  // Downloading to the server is only offered when the server turned it on (Server → Advanced).
+  const onServerDownload = session?.settings.downloadsEnabled && session.server?.serverDownloads
     ? async (r: Release) => {
         try {
           const d = await api.server.requestDownload(r.id, itemKey, detail?.poster ?? null);
@@ -346,12 +359,23 @@ export default function Watch() {
         </div>
       )}
 
+      {(phase === 'preparing' || phase === 'init') && (
+        <button onClick={back} aria-label="Back" className="wco-top absolute top-4 left-4 z-10 grid size-11 place-items-center rounded-full text-white/90 hover:bg-white/10 sm:top-6 sm:left-6">
+          <ArrowLeft className="size-6" />
+        </button>
+      )}
+
       {phase === 'preparing' && (
         <div className="absolute inset-0 grid place-items-center">
           <div className="flex flex-col items-center gap-4 text-center">
             <Spinner className="size-10 text-white" />
             <div className="font-display text-xl font-semibold">{title}</div>
             <div className="text-sm text-muted">{epLabel ? `${epLabel} · ` : ''}Getting it ready…</div>
+            {!roomCode && (
+              <button onClick={abandonPrepare} className="mt-2 rounded-full px-4 py-2 text-sm text-white/80 ring-1 ring-white/20 transition hover:bg-white/10 hover:text-white">
+                Choose another source
+              </button>
+            )}
           </div>
         </div>
       )}

@@ -117,6 +117,8 @@ export interface Session {
   account: Account;
   profiles: Profile[];
   settings: AccountSettings;
+  /** Server-wide switches (Server → Advanced). */
+  server?: { serverDownloads: boolean };
 }
 
 export interface SubtitleStyle {
@@ -180,6 +182,7 @@ export interface Preferences {
     externalPlayer: '' | 'vlc' | 'mpv' | 'iina';
     skipIntroAutomatically: boolean;
     skipCreditsAutomatically: boolean;
+    skipFallbackSeconds: number;
     accent: 'nova' | 'ember' | 'ocean' | 'aurora' | 'mono';
     updateNotices: boolean;
     hideSpoilers: boolean;
@@ -439,6 +442,8 @@ export interface PlaySource {
 export interface AppConfig {
   version: string;
   mode: 'server' | 'desktop';
+  /** The server's operating system ('android' when it runs inside Nova for Android). */
+  platform?: string;
   torrentMode: 'server' | 'client';
   enginePort: number;
   desktopDownloadUrl: string;
@@ -724,6 +729,8 @@ export interface DownloadRule {
   mode: 'new' | 'missing';
   enabled: boolean;
   lastCheckedAt: string | null;
+  /** "New episodes": the last one out when the rule was turned on. */
+  after?: { season: number; episode: number } | null;
   createdAt: string;
 }
 

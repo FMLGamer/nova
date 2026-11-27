@@ -117,7 +117,7 @@ function img(path: string | null | undefined, size: string): string | null {
 
 function requireKey(): string {
   const key = integration('tmdbApiKey');
-  if (!key) throw new HttpError(503, 'TMDB is not configured (Server → Overview → Integrations)');
+  if (!key) throw new HttpError(503, 'TMDB is not configured (Server → Advanced → Integrations)');
   return key;
 }
 

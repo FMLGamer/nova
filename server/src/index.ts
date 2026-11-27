@@ -46,6 +46,13 @@ import { trackersRouter } from './routes/trackers.js';
 process.on('uncaughtException', (err) => console.error('[nova] uncaughtException:', err));
 process.on('unhandledRejection', (reason) => console.error('[nova] unhandledRejection:', reason));
 
+// Nova for Android starts the server as a child process and holds its stdin: when the app goes away, so does the server.
+if (process.env.NOVA_EXIT_WITH_PARENT === '1') {
+  process.stdin.on('end', () => process.exit(0));
+  process.stdin.on('error', () => process.exit(0));
+  process.stdin.resume();
+}
+
 bootstrapAdmin();
 seedLocalProvider();
 

@@ -2,6 +2,51 @@
 
 What changed in each Nova release. Each release on GitHub shows its section of this file.
 
+## [2.7.0] - 2026-11-27
+
+### New
+- **Run Nova on your phone**: Nova for Android can now run the Nova server on the phone itself, like the desktop app
+  (choose "Run Nova on this phone" when the app asks for a server). One owner, no sign-in; it streams torrents on the
+  phone and keeps your history, lists and downloads there. There's no ffmpeg on the phone yet, so files with audio the
+  phone can't play (AC3, DTS) don't play, embedded subtitles aren't read and casting isn't available. 64-bit ARM phones.
+- **Download buttons on episodes**: every episode has a download button in its bottom-right corner (like the watched
+  check in the top right) that shows its progress and removes the download again.
+- The **Download** button on a title (it was called Save) downloads this episode, the whole season you're looking at,
+  every missing episode, or turns on **Auto-download new episodes**: only episodes that come out after you turn it on,
+  while Nova is open. Downloads run two at a time; the rest wait their turn.
+- **Search in Settings and Server settings**: type to find any setting, typos forgiven ("subtitel size" finds the
+  subtitle Size).
+- **Skip without intro data** (Settings → Playback): when Nova doesn't know where an episode's intro or credits are,
+  the Skip button jumps ahead a set number of seconds (85 by default, or off).
+- A back button on the "getting ready" screen, and a "Choose another source" button there, so a slow source never
+  locks you in.
+
+### Changed
+- **Settings and Server settings are reorganised** into clear groups (You, Watching & reading, Look & feel, Nova; and
+  Server, Content, Maintenance), with the settings only some people need under a separate **Advanced** page: source
+  filters, compatibility, custom CSS, API tokens and Beta in Settings; the port, API keys and server downloads in Server
+  settings. Old links still land in the right place.
+- **Downloading to the server** is now only offered when an admin turns it on (Server → Advanced → Downloads); otherwise
+  Download means this device. "New episodes" rules on the server, too, only fetch episodes that come out after the rule
+  was turned on.
+- **Search** puts the best match first: a "Top results" row ranks every kind together by how well the title matches,
+  how well-liked and followed it is, and whether it has artwork, and the kinds follow in that order (search "rick and
+  morty" and the show comes first, not the spin-offs). Titles without artwork get a drawn placeholder instead of a
+  broken image.
+- **Far fewer AniList requests**: everything Nova shows about an anime comes from one request, and titles needed
+  together (recommendations, Up next, stats, auto-download) are fetched together, up to 50 per request. Searches are
+  cached. This keeps Nova well under AniList's rate limit at launch and while browsing.
+- Dropdowns and menus have much better contrast.
+- Dragging a row of cards no longer snaps to the nearest card when you let go, except at the very start and end.
+- The app update "Download" button is gone where Nova updates itself; it shows what's new instead.
+
+### Fixed
+- **The AI assistant got stuck on "Thinking…"** with every model (Ollama, Gemini and others): its answers were never
+  delivered. They now arrive, and a model that only keeps looking things up still ends with an answer.
+- **Long anime opened slowly**: the episode list waited up to several seconds on the filler/recap list from
+  MyAnimeList (Jikan), which is often slow or unreachable. The list now shows at once and the filler marks follow, and
+  they're kept between restarts.
+
 ## [2.6.0] - 2026-11-23
 
 ### New

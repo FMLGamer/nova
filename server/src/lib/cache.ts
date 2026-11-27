@@ -13,7 +13,7 @@ const pending = new Map<string, Promise<unknown>>();
  * served while a fresh copy is fetched (if that takes longer than STALE_WAIT_MS), so the first
  * minutes after a start never wait on, or run into, an upstream rate limit.
  */
-const PERSISTED = ['anilist:', 'anizip:', 'tmdb:', 'cinemeta:', 'read:ani', 'read:ol', 'arm:', 'kitsu:', 'lists:'];
+const PERSISTED = ['anilist:', 'anizip:', 'tmdb:', 'cinemeta:', 'read:ani', 'read:ol', 'arm:', 'kitsu:', 'lists:', 'jikan:'];
 const STALE_FOR_MS = 7 * 24 * 3600_000;
 const STALE_WAIT_MS = 2_500;
 

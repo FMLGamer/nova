@@ -134,7 +134,7 @@ export function cinemetaSearch(kind: Kind, query: string): Promise<CatalogItem[]
 }
 
 async function meta(kind: Kind, imdbId: string): Promise<CmMeta> {
-  if (!isImdbId(imdbId)) throw new HttpError(503, 'Movie and show details need a TMDB key (Server → Overview → Integrations)');
+  if (!isImdbId(imdbId)) throw new HttpError(503, 'Movie and show details need a TMDB key (Server → Advanced → Integrations)');
   return cached(`cinemeta:meta:${kind}:${imdbId}`, DAY, async () => {
     const data = await fetchJson<{ meta?: CmMeta | null }>(`${BASE}/meta/${stremioType(kind)}/${imdbId}.json`, { timeoutMs: 12_000 });
     if (!data.meta?.name) throw new HttpError(404, 'Title not found');

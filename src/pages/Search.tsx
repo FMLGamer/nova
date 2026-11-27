@@ -44,11 +44,18 @@ export default function Search() {
       ).filter((x) => x.metas.length),
   });
 
+  const top = res.data?.top ?? [];
+  const firstIn = (items: { id: string }[]) => {
+    const i = top.findIndex((t) => items.some((x) => x.id === t.id));
+    return i < 0 ? 99 : i;
+  };
   const groups = [
     { key: 'movies' as const, title: 'Movies', items: res.data?.movies ?? [] },
     { key: 'shows' as const, title: 'Shows', items: res.data?.shows ?? [] },
     { key: 'anime' as const, title: 'Anime', items: res.data?.anime ?? [] },
-  ].filter((g) => g.items.length && (tab === 'all' || tab === g.key));
+  ]
+    .filter((g) => g.items.length && (tab === 'all' || tab === g.key))
+    .sort((a, b) => firstIn(a.items) - firstIn(b.items));
   const readItems = tab === 'all' || tab === 'read' ? (reads.data ?? []) : [];
   const total = (res.data?.movies.length ?? 0) + (res.data?.shows.length ?? 0) + (res.data?.anime.length ?? 0) + (reads.data?.length ?? 0);
 
@@ -92,6 +99,16 @@ export default function Search() {
       )}
 
       <div className="mt-8 space-y-12">
+        {tab === 'all' && top.length > 0 && (
+          <section>
+            <h2 className="mb-4 font-display text-xl font-semibold">Top results</h2>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(132px,1fr))] gap-x-4 gap-y-6 sm:grid-cols-[repeat(auto-fill,minmax(168px,1fr))]">
+              {top.slice(0, 6).map((it) => (
+                <PosterCard key={it.id} item={it} />
+              ))}
+            </div>
+          </section>
+        )}
         {groups.map((g) => (
           <section key={g.key}>
             <h2 className="mb-4 font-display text-xl font-semibold">{g.title}</h2>

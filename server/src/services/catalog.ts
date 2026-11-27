@@ -1,3 +1,4 @@
+import { cached } from '../lib/cache.js';
 import { HttpError } from '../lib/http.js';
 import type { CatalogDetail, CatalogItem, Episode, Row } from '../media/types.js';
 import { parseMediaId, stripAnimeSeason } from '../media/types.js';
@@ -67,7 +68,8 @@ export function pickTmdbSeason(
 
 async function animeEpisodes(providerId: string): Promise<Episode[]> {
   const list = await animeEpisodeList(providerId);
-  // Filler only matters for long shows; mark it when MyAnimeList knows.
+  // Filler only matters for long shows; mark it when MyAnimeList is already known to say so (never waits:
+  // Jikan can take many seconds for a long show, and the title page fetches the marks on its own).
   if (list.length < 20) return list;
   const malId = (await anilistDetail(providerId).catch(() => null))?.malId;
   const marks = malId ? await fillerMarks(malId) : null;
@@ -153,13 +155,54 @@ async function animeEpisodesFromTmdb(providerId: string, aniList: Episode[]): Pr
   }
 }
 
+const normTitle = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/**
+ * How well a result answers the query: the title itself beats a title that starts with it, which beats one that
+ * merely contains it; long titles around a short query (reaction videos, fan edits) and unknown years sink.
+ * `rank` is the result's place in its source's own list.
+ */
+export function searchScore(item: CatalogItem, query: string, rank: number): number {
+  const q = normTitle(query);
+  const t = normTitle(item.title);
+  if (!q || !t) return 0;
+  const words = q.split(' ');
+  const match = t === q ? 1 : t.startsWith(`${q} `) ? 0.75 : ` ${t} `.includes(` ${q} `) ? 0.55 : words.every((w) => t.includes(w)) ? 0.4 : 0.15;
+  const tightness = Math.min(1, q.length / t.length);
+  // Well-liked and widely followed titles first; nobody rated it at all: most likely an obscure namesake.
+  const liked = item.rating ? (item.rating / 10) * 0.2 : -0.12;
+  const followed = item.popularity ? Math.max(0, Math.min(0.3, (Math.log10(item.popularity) - 4) * 0.15)) : 0;
+  return match + 0.25 * tightness - Math.min(0.3, rank * 0.03) - (item.year ? 0 : 0.15) - (item.poster ? 0 : 0.2) + liked + followed;
+}
+
 export async function searchAll(
   q: string,
-): Promise<{ movies: CatalogItem[]; shows: CatalogItem[]; anime: CatalogItem[] }> {
+): Promise<{ top: CatalogItem[]; movies: CatalogItem[]; shows: CatalogItem[]; anime: CatalogItem[] }> {
   const [movies, shows, anime] = await Promise.all([
     tmdbSearch('movie', q).catch(() => [] as CatalogItem[]),
     tmdbSearch('tv', q).catch(() => [] as CatalogItem[]),
-    anilistSearch(q).catch(() => [] as CatalogItem[]),
+    cached(`anilist:find:${q.toLowerCase()}`, 60 * 60_000, () => anilistSearch(q)).catch(() => [] as CatalogItem[]),
   ]);
-  return { movies, shows, anime };
+  const scored = (list: CatalogItem[]) => list.map((item, rank) => ({ item, score: searchScore(item, q, rank) })).sort((a, b) => b.score - a.score);
+  const [m, s, a] = [scored(movies), scored(shows), scored(anime)];
+  // The same title as an anime and a show (AniList and TMDB both list it): keep the better-placed one.
+  const seen = new Set<string>();
+  const top = [...m, ...s, ...a]
+    .sort((x, y) => y.score - x.score)
+    .filter(({ item }) => {
+      const k = `${normTitle(item.title)}|${item.year ?? ''}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .slice(0, 12)
+    .map((x) => x.item);
+  return { top, movies: m.map((x) => x.item), shows: s.map((x) => x.item), anime: a.map((x) => x.item) };
 }

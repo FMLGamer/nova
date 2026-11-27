@@ -152,7 +152,7 @@ async function anilistSave(token: string, anilistId: number, patch: TrackPatch):
 
 function malCredentials(): { id: string; secret: string } {
   const id = integration('malClientId');
-  if (!id) throw new HttpError(409, 'MyAnimeList is not set up on this server yet (Server → Overview → Integrations)');
+  if (!id) throw new HttpError(409, 'MyAnimeList is not set up on this server yet (Server → Advanced → Integrations)');
   return { id, secret: integration('malClientSecret') };
 }
 
@@ -393,15 +393,23 @@ async function anilistLists(a: AccountRow, kind: Kind): Promise<TrackedShow[]> {
     }));
 }
 
-/** MyAnimeList ids -> AniList ids (Nova's anime and manga ids), 50 at a time. */
+/** MyAnimeList ids -> AniList ids (Nova's anime and manga ids), 50 at a time. Ids never change, so each is asked once. */
+const malToAni = new Map<string, number | null>();
 async function anilistIdsForMal(malIds: number[], kind: Kind): Promise<Map<number, number>> {
   const out = new Map<number, number>();
-  for (let i = 0; i < malIds.length; i += 50) {
+  const unknown = malIds.filter((id) => !malToAni.has(`${kind}:${id}`));
+  for (let i = 0; i < unknown.length; i += 50) {
+    const chunk = unknown.slice(i, i + 50);
     const { Page } = await anilistGql<{ Page: { media: { id: number; idMal: number }[] } }>(
       `query ($ids: [Int]) { Page(perPage: 50) { media(idMal_in: $ids, type: ${kind === 'manga' ? 'MANGA' : 'ANIME'}) { id idMal } } }`,
-      { ids: malIds.slice(i, i + 50) },
+      { ids: chunk },
     );
-    for (const m of Page.media) out.set(m.idMal, m.id);
+    for (const id of chunk) malToAni.set(`${kind}:${id}`, null);
+    for (const m of Page.media) malToAni.set(`${kind}:${m.idMal}`, m.id);
+  }
+  for (const id of malIds) {
+    const ani = malToAni.get(`${kind}:${id}`);
+    if (ani) out.set(id, ani);
   }
   return out;
 }

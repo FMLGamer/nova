@@ -20,7 +20,7 @@ Nova ships no content sources of its own. Everything that finds or fetches media
 | **Nova desktop app** | For Windows, macOS and Linux: installer, `.zip`/`.tar.gz`, portable `.exe` or AppImage. Everything runs on your computer, with no account or setup. | Your computer |
 | **Docker: `nova:latest`** | Multi-user server with invite-only accounts. | The server |
 | **Docker: `nova:client`** | Same server, but it never joins a torrent swarm. | Each viewer's device, through the desktop app or the browser |
-| **Nova for Android** | The app for phones and tablets: it opens your Nova server (any of the above). | Wherever that server streams |
+| **Nova for Android** | The app for phones and tablets: it opens your Nova server (any of the above), or runs Nova on the phone itself. | That server, or the phone |
 
 ### Nova desktop app
 
@@ -45,7 +45,7 @@ The Windows installer and the AppImage download new versions in the background a
 The app also works as a local streaming engine for `nova:client` servers. When such a site wants to play a torrent, Nova asks
 you once whether to allow it. Allowed sites are listed under **Settings → Account & sharing**.
 
-Nova's server inside the app listens on `127.0.0.1:11471`; pick another port under **Server → Overview**.
+Nova's server inside the app listens on `127.0.0.1:11471`; pick another port under **Server → Advanced**.
 
 On Windows with Auto HDR, the app keeps its interface in standard range (Windows otherwise switches it between SDR and
 HDR as videos start and stop); HDR videos and RTX Video HDR still play in HDR. **Settings → Appearance → HDR** lets
@@ -54,10 +54,17 @@ Auto HDR brighten the interface instead.
 ### Nova for Android
 
 Download `Nova-x.y.z-android.apk` from [Releases](https://github.com/FMLGamer/nova/releases) and install it (Android 7
-or newer; allow installing from your browser or file manager when asked). Enter the address of your Nova server, the same
-one you open in a browser, for example `https://nova.example.com` or `http://192.168.1.20:3000`. The app is Nova's own
-web interface in a native window, so it is always as new as your server; **Settings → About Nova → Switch server**
-connects to another one.
+or newer on a 64-bit ARM phone or tablet; allow installing from your browser or file manager when asked). Then either:
+
+- **Connect to your Nova server**: enter its address, the same one you open in a browser, for example
+  `https://nova.example.com` or `http://192.168.1.20:3000`. The app is Nova's own web interface in a native window, so it
+  is always as new as your server.
+- **Run Nova on this phone**: like the desktop app, the server runs on the phone itself (one owner, no sign-in) and
+  streams torrents there. Your history, lists and downloads stay on the phone; media you keep goes to the app's Movies
+  folder. It runs while the app is open. The phone has no ffmpeg (yet), so files the phone can't play as they are
+  (for example AC3/DTS audio) don't play, embedded subtitles aren't read, and casting isn't available.
+
+**Settings → About Nova → Switch server** goes back to this choice.
 
 ### Docker
 
@@ -188,9 +195,12 @@ for. The installer, archives and portable app end up in `desktop/release/`. For 
 at https://discord.com/developers/applications and set its ID as `DISCORD_CLIENT_ID` when building (in CI: a repository
 variable of that name); without it the Discord option stays hidden.
 
-The Android app lives in `mobile/` (Capacitor): `npm --prefix mobile install`, then in `mobile/` run `npx cap sync android`
-and build `mobile/android` with Android Studio or `./gradlew assembleRelease -PnovaVersion=x.y.z` (JDK 21 and the Android
-SDK). CI signs it with the key in the `NOVA_ANDROID_*` repository secrets.
+The Android app lives in `mobile/` (Capacitor). Build the web app and the server first, then run
+`node mobile/scripts/bundle-android.mjs` on Linux (it needs `zip`, `ar`, `tar` and `readelf`): it packs the server and web
+app into the app's assets and fetches Termux's Node.js build for Android with its libraries into `jniLibs`. Then
+`npm --prefix mobile install`, `npx cap sync android` in `mobile/`, and build `mobile/android` with Android Studio or
+`./gradlew assembleRelease -PnovaVersion=x.y.z` (JDK 21 and the Android SDK). CI signs it with the key in the
+`NOVA_ANDROID_*` repository secrets, and tests the phone's own server in an emulator.
 
 The project layout:
 

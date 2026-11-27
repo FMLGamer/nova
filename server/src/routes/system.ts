@@ -16,7 +16,7 @@ import { HttpError } from '../lib/http.js';
 import { asyncHandler } from '../lib/async.js';
 import { cached, forget } from '../lib/cache.js';
 
-export const VERSION = '2.6.0';
+export const VERSION = '2.7.0';
 
 export const systemRouter = Router();
 
@@ -25,6 +25,8 @@ systemRouter.get('/config', (_req, res) => {
   res.json({
     version: VERSION,
     mode: config.mode,
+    /** 'android' when this server runs inside Nova for Android. */
+    platform: process.platform,
     torrentMode: config.torrentMode,
     enginePort: config.enginePort,
     desktopDownloadUrl: config.desktopDownloadUrl,

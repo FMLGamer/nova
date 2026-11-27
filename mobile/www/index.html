@@ -26,6 +26,11 @@
         <button id="go" type="submit">Connect</button>
       </form>
       <p id="error" class="error" role="alert" hidden></p>
+      <div id="local" class="local" hidden>
+        <h2>No server?</h2>
+        <p class="hint">Nova can run on this phone itself, like the desktop app. Your history, lists and downloads stay on the phone.</p>
+        <button id="use-local" type="button" class="secondary">Run Nova on this phone</button>
+      </div>
       <div id="recent" class="recent" hidden>
         <h2>Recent servers</h2>
         <ul id="list"></ul>
@@ -37,14 +42,15 @@
       const RECENT = 'nova.recent';
       const params = new URLSearchParams(location.search);
       const saved = localStorage.getItem(KEY);
+      const localServer = novaShell.localServer();
       // Straight to the server unless the user asked to pick another one.
-      if (saved && !params.has('change')) location.replace(saved);
+      if (saved && saved !== 'local' && !params.has('change')) location.replace(saved);
 
       const input = document.getElementById('url');
       const button = document.getElementById('go');
       const error = document.getElementById('error');
       const recent = JSON.parse(localStorage.getItem(RECENT) || '[]');
-      if (saved) input.value = saved;
+      if (saved && saved !== 'local') input.value = saved;
 
       const list = document.getElementById('list');
       for (const url of recent) {
@@ -97,6 +103,33 @@
         e.preventDefault();
         connect(input.value);
       });
+
+      // Nova on the phone itself: offered when this build carries it; started right away when it was picked before.
+      const localBox = document.getElementById('local');
+      const localButton = document.getElementById('use-local');
+      async function useLocal() {
+        error.hidden = true;
+        localButton.disabled = button.disabled = true;
+        localButton.textContent = 'Starting Nova on this phone…';
+        try {
+          const url = await novaShell.startLocal();
+          localStorage.setItem(KEY, 'local');
+          location.replace(url);
+        } catch (e) {
+          error.textContent = `Nova couldn't start on this phone: ${e && e.message ? e.message : e}`;
+          error.hidden = false;
+          localButton.disabled = button.disabled = false;
+          localButton.textContent = 'Run Nova on this phone';
+        }
+      }
+      if (localServer) {
+        localServer.available().then(({ available }) => {
+          if (!available) return;
+          localBox.hidden = false;
+          localButton.onclick = useLocal;
+          if (saved === 'local' && !params.has('change')) useLocal();
+        });
+      }
     </script>
   </body>
 </html>

@@ -1,4 +1,4 @@
-// Settings → Customize (what each page shows), Settings → Beta, and importing a viewing history.
+// Settings → Pages & menus (what each page shows), Settings → Advanced → Beta, and importing a viewing history.
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -8,17 +8,7 @@ import { PAGES, layoutPatch, pageLayout, type PageId } from '../lib/layout';
 import { useSession } from '../lib/queries';
 import { errorText, toast } from '../lib/store';
 import type { HeroSize, Preferences } from '../lib/types';
-import { Button, Card, Chip, Row, Segmented, Switch } from '../components/ui';
-
-function Group({ title, children, hint }: { title: string; children: React.ReactNode; hint?: React.ReactNode }) {
-  return (
-    <Card className="mb-5">
-      <h3 className="font-display text-lg font-semibold">{title}</h3>
-      {hint && <p className="mt-1 text-sm text-muted">{hint}</p>}
-      <div className="mt-2 divide-y divide-line">{children}</div>
-    </Card>
-  );
-}
+import { Button, Chip, Row, Segmented, SettingsGroup as Group, Switch } from '../components/ui';
 
 const SIZES: { value: HeroSize; label: string }[] = [
   { value: 'small', label: 'Small' },

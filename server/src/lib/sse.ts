@@ -7,7 +7,7 @@ export interface SseChannel {
 }
 
 /** Opens a server-sent-events response. Compression is skipped for /api/sse-style paths in index.ts. */
-export function openSse(req: Request, res: Response): SseChannel {
+export function openSse(_req: Request, res: Response): SseChannel {
   res.status(200);
   res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store, no-transform');
@@ -18,7 +18,9 @@ export function openSse(req: Request, res: Response): SseChannel {
   const ping = setInterval(() => {
     if (!done) res.write(': ping\n\n');
   }, 15_000);
-  req.on('close', () => {
+  // The response, not the request: a request "closes" as soon as its body has been read, which for a POST
+  // happens right at the start and silenced every event after the first (the assistant's endless "Thinking…").
+  res.on('close', () => {
     done = true;
     clearInterval(ping);
   });

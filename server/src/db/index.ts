@@ -1,17 +1,17 @@
-import Database from 'better-sqlite3';
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
+import { openDatabase, type Database } from './sqlite.js';
 
 fs.mkdirSync(config.dataDir, { recursive: true });
 
-export const db = new Database(path.join(config.dataDir, 'stream.db'));
+export const db = openDatabase(path.join(config.dataDir, 'stream.db'));
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 interface Migration {
   version: number;
-  up: (d: Database.Database) => void;
+  up: (d: Database) => void;
 }
 
 const migrations: Migration[] = [
@@ -568,6 +568,16 @@ const migrations: Migration[] = [
           value      TEXT NOT NULL,
           expires_at INTEGER NOT NULL
         );
+      `);
+    },
+  },
+  {
+    // "New episodes" rules remember the last episode out when they were turned on: only later ones download.
+    version: 13,
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE download_rules ADD COLUMN after_season INTEGER;
+        ALTER TABLE download_rules ADD COLUMN after_episode INTEGER;
       `);
     },
   },
