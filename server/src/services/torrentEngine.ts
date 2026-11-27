@@ -19,7 +19,8 @@ async function torrents(): Promise<WebTorrent> {
   if (config.torrentMode === 'client') throw new Error('This server does not download torrents; your device streams them');
   if (!_client) {
     const { default: Client } = await import('webtorrent');
-    _client ??= new Client({ uploadLimit: config.uploadLimitBps });
+    // On a phone there's no router port mapping to ask for (and Android won't list the network to find one).
+    _client ??= new Client({ uploadLimit: config.uploadLimitBps, ...(process.platform === 'android' ? { natUpnp: false, natPmp: false } : {}) });
     _client.on('error', (err) => console.error('[torrent] client error:', err));
   }
   return _client;

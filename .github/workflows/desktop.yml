@@ -87,8 +87,9 @@ jobs:
           npm run build
           npm --prefix server run build
 
+      # 64-bit and 32-bit ARM: an APK with only 64-bit libraries wouldn't install on 32-bit phones and TV boxes.
       - name: Bundle the server and Node.js for the phone
-        run: node mobile/scripts/bundle-android.mjs arm64-v8a
+        run: node mobile/scripts/bundle-android.mjs arm64-v8a armeabi-v7a
 
       - name: Copy the shell into the Android project
         working-directory: mobile

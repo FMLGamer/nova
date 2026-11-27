@@ -8,7 +8,8 @@ What changed in each Nova release. Each release on GitHub shows its section of t
 - **Run Nova on your phone**: Nova for Android can now run the Nova server on the phone itself, like the desktop app
   (choose "Run Nova on this phone" when the app asks for a server). One owner, no sign-in; it streams torrents on the
   phone and keeps your history, lists and downloads there. There's no ffmpeg on the phone yet, so files with audio the
-  phone can't play (AC3, DTS) don't play, embedded subtitles aren't read and casting isn't available. 64-bit ARM phones.
+  phone can't play (AC3, DTS) don't play, embedded subtitles aren't read and casting isn't available. ARM phones,
+  tablets and TV boxes (64- and 32-bit); the app is bigger now because it carries Node.js.
 - **Download buttons on episodes**: every episode has a download button in its bottom-right corner (like the watched
   check in the top right) that shows its progress and removes the download again.
 - The **Download** button on a title (it was called Save) downloads this episode, the whole season you're looking at,

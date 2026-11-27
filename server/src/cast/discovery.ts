@@ -27,10 +27,16 @@ export interface CastDevice {
   saved?: boolean;
 }
 
-/** IPv4 addresses of this machine's real network interfaces. */
+/** IPv4 addresses of this machine's real network interfaces (none when the system won't say, as on newer Android). */
 export function lanAddresses(): { address: string; netmask: string }[] {
   const out: { address: string; netmask: string }[] = [];
-  for (const list of Object.values(os.networkInterfaces())) {
+  let interfaces: ReturnType<typeof os.networkInterfaces> = {};
+  try {
+    interfaces = os.networkInterfaces();
+  } catch {
+    return out;
+  }
+  for (const list of Object.values(interfaces)) {
     for (const i of list ?? []) {
       if (i.family === 'IPv4' && !i.internal && !i.address.startsWith('169.254.')) out.push({ address: i.address, netmask: i.netmask });
     }

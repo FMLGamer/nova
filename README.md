@@ -54,7 +54,7 @@ Auto HDR brighten the interface instead.
 ### Nova for Android
 
 Download `Nova-x.y.z-android.apk` from [Releases](https://github.com/FMLGamer/nova/releases) and install it (Android 7
-or newer on a 64-bit ARM phone or tablet; allow installing from your browser or file manager when asked). Then either:
+or newer on an ARM phone, tablet or TV box; allow installing from your browser or file manager when asked). Then either:
 
 - **Connect to your Nova server**: enter its address, the same one you open in a browser, for example
   `https://nova.example.com` or `http://192.168.1.20:3000`. The app is Nova's own web interface in a native window, so it
